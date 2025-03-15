@@ -1,0 +1,8 @@
+fastapi[standard]
+uvicorn
+pydantic
+pydantic-settings
+sqlalchemy
+qdrant-client[fastembed]
+sentence-transformers[onnx]
+huggingface_hub
