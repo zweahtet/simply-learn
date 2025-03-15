@@ -21,6 +21,7 @@ interface RateLimitInfo {
 export function LimitedActionButton({
 	actionName,
 	onClick,
+	disabled
 }: LimitedActionButtonProps) {
 	const [isLoading, setIsLoading] = useState(false);
 	const [limitInfo, setLimitInfo] = useState<RateLimitInfo | null>(null);
@@ -86,23 +87,18 @@ export function LimitedActionButton({
 	};
 
 	return (
-		<div className="flex flex-col">
+		<div className="flex flex-col items-end">
 			<Button
 				onClick={handleClick}
-				disabled={isLimited || isLoading}
-				className={`${
-					isLimited
-						? "bg-gray-300 text-gray-500 cursor-not-allowed"
-						: ""
-				}`}
+				disabled={isLimited || isLoading || disabled}
 			>
 				{isLoading ? "Processing..." : actionName}
 			</Button>
 
 			{limitInfo && (
-				<div className="mt-2 text-sm">
+				<div className="mt-2 text-sm w-full">
 					{isLimited ? (
-						<p className="text-red-500">
+						<p className="text-red-500 text-right">
 							Daily limit reached. Resets in{" "}
 							{formatTimeRemaining()}
 						</p>

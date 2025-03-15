@@ -504,13 +504,16 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 									Load Sample Content
 								</Button>
 
-								<LimitedActionButton
-									actionName="Process Content"
-									onClick={form.handleSubmit(onSubmit)}
-									disabled={
-										!form.formState.isValid || !!fileError
-									}
-								/>
+								<div>
+									<LimitedActionButton
+										actionName="Process Content"
+										onClick={form.handleSubmit(onSubmit)}
+										disabled={
+											!form.formState.isValid ||
+											!!fileError
+										}
+									/>
+								</div>
 							</div>
 						</div>
 					</form>
