@@ -20,8 +20,6 @@ import {
 	CognitiveAssessment,
 	AssessmentResults,
 } from "@/components/Assessment";
-// import { AssessmentResults } from "@/components/AssessmentResults";
-import { YouTubeRecommendations } from "@/components/YouTubeRecommendations";
 
 // Extended to include cognitive assessment
 // Assessment-first flow states
@@ -53,7 +51,6 @@ export default function Home() {
 	const [originalContent, setOriginalContent] = useState("");
 	const [learnerLevel, setLearnerLevel] = useState("");
 	const [exercises, setExercises] = useState("");
-	const [isLoading, setIsLoading] = useState(false);
 	const [assessmentResults, setAssessmentResults] =
 		useState<AssessmentResultsSummary | null>(null);
 	const [cognitiveProfile, setCognitiveProfile] =
@@ -93,8 +90,6 @@ export default function Home() {
 	};
 
 	const adaptContent = async (uploadedContent: string) => {
-		setIsLoading(true);
-
 		try {
 			// Use the enhanced adaptation API with cognitive profile
 			const response = await fetch("/api/simplify-content", {
@@ -122,13 +117,10 @@ export default function Home() {
 		} catch (error) {
 			console.error("Error:", error);
 			alert("Error connecting to server");
-		} finally {
-			setIsLoading(false);
 		}
 	};
 
 	const handleGenerateExercises = async () => {
-		setIsLoading(true);
 
 		try {
 			const response = await fetch("/api/generate-exercises", {
@@ -157,8 +149,6 @@ export default function Home() {
 		} catch (error) {
 			console.error("Error:", error);
 			alert("Error connecting to server");
-		} finally {
-			setIsLoading(false);
 		}
 	};
 
@@ -298,7 +288,7 @@ export default function Home() {
 				</header>
 
 				{/* Loading overlay */}
-				{isLoading && (
+				{/* {isLoading && (
 					<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
 						<div className="bg-white p-6 rounded-lg shadow-lg text-center">
 							<div className="animate-spin h-10 w-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
@@ -310,7 +300,7 @@ export default function Home() {
 							</p>
 						</div>
 					</div>
-				)}
+				)} */}
 
 				{/* Welcome screen */}
 				{view === "welcome" && (
