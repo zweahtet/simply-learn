@@ -11,16 +11,20 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ConceptVideos } from "@/components/ConceptVideos";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { YouTubeRecommendations } from "@/components/YouTubeRecommendations";
+import { BookOpen, Video } from "lucide-react";
 
 interface ContentDisplayProps {
 	content: string;
+	originalContent: string; // Added to pass to YouTubeRecommendations
 	level: string;
 	onGenerateExercises: () => void;
 }
 
 export function ContentDisplay({
 	content,
+	originalContent,
 	level,
 	onGenerateExercises,
 }: ContentDisplayProps) {
@@ -38,16 +42,50 @@ export function ContentDisplay({
 					</CardDescription>
 				</CardHeader>
 
-				<CardContent>
-					<div className="bg-white rounded-md border p-6 shadow-sm">
-						<div
-							className="prose max-w-none"
-							dangerouslySetInnerHTML={{ __html: content }}
-						/>
+				<Tabs defaultValue="content" className="w-full">
+					<div className="px-6">
+						<TabsList className="grid w-full grid-cols-2 mb-4">
+							<TabsTrigger
+								value="content"
+								className="flex items-center"
+							>
+								<BookOpen className="h-4 w-4 mr-2" />
+								Content
+							</TabsTrigger>
+							<TabsTrigger
+								value="videos"
+								className="flex items-center"
+							>
+								<Video className="h-4 w-4 mr-2" />
+								Video Explanations
+							</TabsTrigger>
+						</TabsList>
 					</div>
-				</CardContent>
 
-				<CardFooter className="flex justify-center">
+					<TabsContent value="content">
+						<CardContent>
+							<div className="bg-white rounded-md border p-6 shadow-sm">
+								<div
+									className="prose max-w-none"
+									dangerouslySetInnerHTML={{
+										__html: content,
+									}}
+								/>
+							</div>
+						</CardContent>
+					</TabsContent>
+
+					<TabsContent value="videos">
+						<CardContent>
+							<YouTubeRecommendations
+								content={originalContent}
+								level={level}
+							/>
+						</CardContent>
+					</TabsContent>
+				</Tabs>
+
+				<CardFooter className="flex justify-center mt-4">
 					<Button onClick={onGenerateExercises} size="lg">
 						Generate Practice Exercises
 					</Button>

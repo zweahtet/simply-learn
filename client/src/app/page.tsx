@@ -1,4 +1,4 @@
-// src/app/page.tsx
+// simply-learn/client/src/app/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -411,14 +411,9 @@ export default function Home() {
 					<div className="space-y-6">
 						<ContentDisplay
 							content={content}
+							originalContent={originalContent}
 							level={learnerLevel}
 							onGenerateExercises={handleGenerateExercises}
-						/>
-
-						{/* Add YouTube recommendations below content */}
-						<YouTubeRecommendations
-							content={originalContent}
-							level={learnerLevel}
 						/>
 					</div>
 				)}
