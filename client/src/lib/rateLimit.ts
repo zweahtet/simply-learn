@@ -5,8 +5,8 @@ import { cookies } from "next/headers";
 
 // Initialize Redis client
 const redis = new Redis({
-    url: process.env.UPSTASH_REDIS_URL,
-    token: process.env.UPSTASH_REDIS_TOKEN,
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
 // Create a rate limiter instance

@@ -1,4 +1,4 @@
-// src/components/ContentUploader.tsx
+// simply-learn/client/src/components/ContentUploader.tsx
 "use client";
 
 import { useState } from "react";

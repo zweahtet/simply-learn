@@ -1,4 +1,4 @@
-// src/components/ContentDisplay.tsx
+// simply-learn/client/src/components/ContentDisplay.tsx
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -53,9 +53,6 @@ export function ContentDisplay({
 					</Button>
 				</CardFooter>
 			</Card>
-
-			{/* Add the concept videos component */}
-			<ConceptVideos content={content} level={level} />
 		</div>
 	);
 }
