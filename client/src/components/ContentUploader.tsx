@@ -16,6 +16,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UploadIcon, FileTextIcon, BookIcon } from "lucide-react";
+import { LimitedActionButton } from "@/components/LimitedActionButton";
 
 interface ContentUploaderProps {
 	onUpload: (content: string) => void;
@@ -26,18 +27,18 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 	const [title, setTitle] = useState("");
 	const [source, setSource] = useState("");
 	const [error, setError] = useState("");
-	const [isLoading, setIsLoading] = useState(false);
+	// const [isLoading, setIsLoading] = useState(false);
 	const [activeTab, setActiveTab] = useState("text");
 
-	const handleSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
+	const handleSubmit = async () => {
+		// e.preventDefault();
 
 		if (!content.trim()) {
 			setError("Please enter some content");
 			return;
 		}
 
-		setIsLoading(true);
+		// setIsLoading(true);
 		setError("");
 
 		try {
@@ -64,8 +65,6 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		} catch (error) {
 			console.error("Error:", error);
 			setError("Error connecting to server");
-		} finally {
-			setIsLoading(false);
 		}
 	};
 
@@ -236,12 +235,11 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 					Load Sample Content
 				</Button>
 
-				<Button
+				<LimitedActionButton
+					actionName="Process Content"
 					onClick={handleSubmit}
-					disabled={isLoading || !content.trim()}
-				>
-					{isLoading ? "Processing..." : "Process Content"}
-				</Button>
+					disabled={!content.trim()}
+				/>
 			</CardFooter>
 		</Card>
 	);

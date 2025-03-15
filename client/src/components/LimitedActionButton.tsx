@@ -6,18 +6,22 @@ import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 
 interface LimitedActionButtonProps {
-    actionName: string;
-    onClick: () => Promise<void>;
+	actionName: string;
+	onClick: () => Promise<void>;
+	disabled?: boolean;
 }
 
 interface RateLimitInfo {
-    total: number;
-    remaining: number;
-    used: number;
-    resetIn: number;
+	total: number;
+	remaining: number;
+	used: number;
+	resetIn: number;
 }
 
-export default function LimitedActionButton({ actionName, onClick }: LimitedActionButtonProps) {
+export function LimitedActionButton({
+	actionName,
+	onClick,
+}: LimitedActionButtonProps) {
 	const [isLoading, setIsLoading] = useState(false);
 	const [limitInfo, setLimitInfo] = useState<RateLimitInfo | null>(null);
 	const [isLimited, setIsLimited] = useState(false);
@@ -83,17 +87,17 @@ export default function LimitedActionButton({ actionName, onClick }: LimitedActi
 
 	return (
 		<div className="flex flex-col">
-			<button
+			<Button
 				onClick={handleClick}
 				disabled={isLimited || isLoading}
-				className={`px-4 py-2 rounded-md font-medium transition-colors ${
+				className={`${
 					isLimited
 						? "bg-gray-300 text-gray-500 cursor-not-allowed"
-						: "bg-blue-500 hover:bg-blue-600 text-white"
+						: ""
 				}`}
 			>
 				{isLoading ? "Processing..." : actionName}
-			</button>
+			</Button>
 
 			{limitInfo && (
 				<div className="mt-2 text-sm">
