@@ -1,3 +1,5 @@
+// simply-learn/client/src/app/api/process-content/route.ts
+
 import { NextResponse } from 'next/server';
 import { Groq } from 'groq-sdk';
 import { QdrantClient } from '@qdrant/js-client-rest';
@@ -14,7 +16,10 @@ const qdrantClient = new QdrantClient({
     apiKey: process.env.QDRANT_API_KEY
 });
 
-const embeddingModel = await pipeline('embeddings', 'sentence-transformers/all-mpnet-base-v2')
+const embeddingModel = await pipeline('feature-extraction', 'mixedbread-ai/mxbai-embed-large-v1', {
+    cache_dir: './cache',
+    dtype: 'fp32',
+})
 
 // Helper function to split content into chunks
 function splitContentIntoChunks(content: string, maxChunkSize = 500) {
@@ -93,36 +98,36 @@ export async function POST(request: Request) {
     try {
         const { content, title, source } = await request.json();
 
-        // Ensure collection exists
-        await ensureCollectionExists();
+        // // Ensure collection exists
+        // await ensureCollectionExists();
 
-        // Split content into chunks
+        // // Split content into chunks
         const chunks = splitContentIntoChunks(content);
 
-        // Process each chunk
-        for (const chunk of chunks) {
-            // For hackathon purposes, we'll use a mock embedding
-            // In a real implementation, use proper embedding API
-            // const mockEmbedding = Array(1536).fill(0).map(() => Math.random());
-            const chunkEmbedding = await embeddingModel(chunk, {
-                pooling: 'mean',
-                normalize: true
-            })
+        // // Process each chunk
+        // for (const chunk of chunks) {
+        //     // For hackathon purposes, we'll use a mock embedding
+        //     // In a real implementation, use proper embedding API
+        //     // const mockEmbedding = Array(1536).fill(0).map(() => Math.random());
+        //     const chunkEmbedding = await embeddingModel(chunk, {
+        //         pooling: 'mean',
+        //         normalize: true
+        //     })
 
-            // Store in Qdrant
-            await qdrantClient.upsert('educational_content', {
-                points: [{
-                    id: uuidv4(),
-                    vector: Array.from(chunkEmbedding.data),
-                    payload: {
-                        content: chunk,
-                        title,
-                        source,
-                        originalDifficulty: await assessReadabilityLevel(chunk)
-                    }
-                }]
-            });
-        }
+        //     // Store in Qdrant
+        //     await qdrantClient.upsert('educational_content', {
+        //         points: [{
+        //             id: uuidv4(),
+        //             vector: Array.from(chunkEmbedding.data),
+        //             payload: {
+        //                 content: chunk,
+        //                 title,
+        //                 source,
+        //                 originalDifficulty: await assessReadabilityLevel(chunk)
+        //             }
+        //         }]
+        //     });
+        // }
 
         return NextResponse.json({
             success: true,
