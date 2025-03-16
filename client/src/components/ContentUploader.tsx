@@ -32,9 +32,10 @@ import {
 
 // Constants for validation
 const MAX_WORD_COUNT = 5000;
-const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_MB = 25;
 const MAX_FILE_COUNT = 3;
 const MB_IN_BYTES = 1048576; // 1MB in bytes
+const ALLOWED_FILE_TYPES = ["text/plain", "application/pdf"];
 
 // Helper to count words
 const countWords = (text: string = ""): number => {
@@ -92,14 +93,36 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		},
 	});
 
+	// Get file icon based on file type
+	const getFileIcon = (fileType: string) => {
+		if (fileType === "application/pdf") {
+			return <FileTextIcon className="h-10 w-10 text-red-500" />;
+		}
+		return <FileTextIcon className="h-10 w-10 text-blue-500" />;
+	};
+
+	// Check if file type is allowed
+	const isFileTypeAllowed = (file: File) => {
+		if (ALLOWED_FILE_TYPES.includes(file.type)) return true;
+		// Additional check for .txt files that might have incorrect MIME type
+		if (file.name.endsWith(".txt")) return true;
+		// Additional check for .pdf files that might have incorrect MIME type
+		if (file.name.endsWith(".pdf")) return true;
+		return false;
+	};
+
 	// File upload handler with validation
 	const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const files = e.target.files;
 		if (!files || files.length === 0) return;
 		setFileError(null);
 
-		// Check file count
-		if (files.length > MAX_FILE_COUNT) {
+		// Create a list of all files (existing + new)
+		const allFiles = [...uploadedFiles];
+		const newFilesToAdd: File[] = [];
+
+		// Check if adding these files would exceed the max file count
+		if (allFiles.length + files.length > MAX_FILE_COUNT) {
 			setFileError(`Maximum of ${MAX_FILE_COUNT} files allowed`);
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
@@ -107,66 +130,44 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 			return;
 		}
 
-		// Check file size and type
-		let totalSize = 0;
-		const newFiles: File[] = [];
-		let validationError = null;
+		// Check total size of all files (existing + new)
+		let totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
 
+		// Validate each new file
 		for (let i = 0; i < files.length; i++) {
 			const file = files[i];
-			totalSize += file.size;
 
-			// Check if total size exceeds limit
+			// Check if adding this file would exceed the max size
+			totalSize += file.size;
 			if (totalSize > MAX_FILE_SIZE_MB * MB_IN_BYTES) {
-				validationError = `Files exceed maximum size of ${MAX_FILE_SIZE_MB}MB`;
-				break;
+				setFileError(
+					`Files exceed maximum size of ${MAX_FILE_SIZE_MB}MB`
+				);
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
+				}
+				return;
 			}
 
 			// Check file type
-			if (file.type !== "text/plain" && !file.name.endsWith(".txt")) {
-				validationError = "Only .txt files are supported";
-				break;
-			}
-
-			newFiles.push(file);
-		}
-
-		if (validationError) {
-			setFileError(validationError);
-			if (fileInputRef.current) {
-				fileInputRef.current.value = "";
-			}
-			return;
-		}
-
-		setUploadedFiles(newFiles);
-
-		// Read the first file's content
-		const reader = new FileReader();
-		reader.onload = (event) => {
-			const result = event.target?.result;
-			if (typeof result === "string") {
-				// Update form content
-				form.setValue("content", result);
-				// Check if title is empty, use file name
-				if (!form.getValues("title")) {
-					form.setValue(
-						"title",
-						newFiles[0].name.replace(/\.[^/.]+$/, "")
-					);
+			if (!isFileTypeAllowed(file)) {
+				setFileError("Only PDF and text files are supported");
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
 				}
-
-				// Update word count
-				setContentWordCount(countWords(result));
-
-				// Trigger validation
-				form.trigger("content");
+				return;
 			}
-		};
-		reader.onerror = () => {
-			setError("Error reading file");
-		};
-		reader.readAsText(newFiles[0]);
+
+			newFilesToAdd.push(file);
+		}
+
+		// Add the new files to the existing files
+		setUploadedFiles([...allFiles, ...newFilesToAdd]);
+
+		// Reset the file input
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
 	};
 
 	const onSubmit = async (values: ContentFormValues) => {
@@ -397,20 +398,17 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 												Click to upload or drag and drop
 											</p>
 											<p className="text-xs text-gray-500 mb-4">
-												TXT files only (max{" "}
+												PDF & TXT files (max{" "}
 												{MAX_FILE_SIZE_MB}MB,{" "}
 												{MAX_FILE_COUNT} files)
 											</p>
-											<Button variant="outline" size="sm">
-												Select File
-												{MAX_FILE_COUNT > 1 ? "s" : ""}
-											</Button>
-											<input
+											<Input
 												id="file-upload"
 												ref={fileInputRef}
 												type="file"
-												accept=".txt,text/plain"
-												className="hidden"
+												accept=".pdf,.txt"
+												hidden
+												aria-hidden="true"
 												onChange={handleFileUpload}
 												multiple={MAX_FILE_COUNT > 1}
 											/>
@@ -425,70 +423,75 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 									)}
 
 									{uploadedFiles.length > 0 && (
-										<div className="space-y-2">
+										<div className="space-y-4 mt-4">
 											<p className="text-sm font-medium">
 												Uploaded files:
 											</p>
-											<ul className="text-sm text-gray-600 space-y-1">
+											<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 												{uploadedFiles.map(
 													(file, index) => (
-														<li
+														<div
 															key={index}
-															className="flex items-center"
+															className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow flex flex-col"
 														>
-															<FileTextIcon className="h-3 w-3 mr-1" />
-															{file.name} (
-															{(
-																file.size /
-																MB_IN_BYTES
-															).toFixed(2)}
-															MB)
-														</li>
+															<div className="flex items-center mb-3">
+																{getFileIcon(
+																	file.type
+																)}
+																<div className="ml-3">
+																	<p
+																		className="font-medium text-sm truncate"
+																		title={
+																			file.name
+																		}
+																	>
+																		{
+																			file.name
+																		}
+																	</p>
+																	<p className="text-xs text-gray-500">
+																		{(
+																			file.size /
+																			MB_IN_BYTES
+																		).toFixed(
+																			2
+																		)}{" "}
+																		MB
+																	</p>
+																</div>
+															</div>
+															<div className="text-xs text-gray-600 mt-auto flex justify-between items-center">
+																<span>
+																	{file.type ===
+																	"application/pdf"
+																		? "PDF Document"
+																		: "Text File"}
+																</span>
+																<button
+																	type="button"
+																	onClick={() => {
+																		setUploadedFiles(
+																			uploadedFiles.filter(
+																				(
+																					f,
+																					i
+																				) =>
+																					i !==
+																					index
+																			)
+																		);
+																	}}
+																	className="text-red-500 hover:text-red-700 text-xs"
+																>
+																	Remove
+																</button>
+															</div>
+														</div>
 													)
 												)}
-											</ul>
+											</div>
 										</div>
 									)}
-
-									{form.getValues("content") &&
-										activeTab === "file" && (
-											<div className="space-y-2">
-												<div className="flex justify-between">
-													<p className="text-sm font-medium">
-														Preview:
-													</p>
-													<span
-														className={`text-xs ${
-															contentWordCount >
-															MAX_WORD_COUNT
-																? "text-red-500 font-medium"
-																: "text-gray-500"
-														}`}
-													>
-														{contentWordCount}/
-														{MAX_WORD_COUNT} words
-													</span>
-												</div>
-												<div className="border rounded-md p-3 max-h-[200px] overflow-y-auto text-sm">
-													{form
-														.getValues("content")
-														.slice(0, 500)}
-													{form.getValues("content")
-														.length > 500 && "..."}
-												</div>
-												{form.formState.errors
-													.content && (
-													<p className="text-red-500 text-xs mt-1 flex items-center">
-														<AlertCircle className="h-3 w-3 mr-1" />
-														{
-															form.formState
-																.errors.content
-																.message
-														}
-													</p>
-												)}
-											</div>
-										)}
 								</div>
 							</TabsContent>
 						</Tabs>
