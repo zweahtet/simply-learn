@@ -120,6 +120,7 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		// Create a list of all files (existing + new)
 		const allFiles = [...uploadedFiles];
 		const newFilesToAdd: File[] = [];
+		const existingFileNames = new Set(allFiles.map((file) => file.name));
 
 		// Check if adding these files would exceed the max file count
 		if (allFiles.length + files.length > MAX_FILE_COUNT) {
@@ -136,6 +137,15 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		// Validate each new file
 		for (let i = 0; i < files.length; i++) {
 			const file = files[i];
+
+			// Check for duplicate files
+			if (existingFileNames.has(file.name)) {
+				setFileError(`Duplicate file: ${file.name} - already uploaded`);
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
+				}
+				return;
+			}
 
 			// Check if adding this file would exceed the max size
 			totalSize += file.size;
@@ -159,6 +169,7 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 			}
 
 			newFilesToAdd.push(file);
+			existingFileNames.add(file.name); // Add to set to catch duplicates in current batch too
 		}
 
 		// Add the new files to the existing files
@@ -170,32 +181,61 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		}
 	};
 
-	const onSubmit = async (values: ContentFormValues) => {
-		// Check for file validation errors
-		if (fileError) return;
+	// Check if we have valid data to submit (either valid form or valid files)
+	const hasValidData = () => {
+		const hasValidForm =
+			form.formState.isValid && form.getValues().content.trim() !== "";
+		const hasValidFiles = uploadedFiles.length > 0 && !fileError;
+		return hasValidForm || hasValidFiles;
+	};
 
+	const onSubmit = async (values: ContentFormValues) => {
 		setError("");
 
 		try {
-			// Process content on the server
-			const response = await fetch("/api/process-content", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					content: values.content,
-					title: values.title || "Untitled",
-					source: values.source || "Unknown",
-				}),
-			});
+			// If we have files, process them
+			if (uploadedFiles.length > 0) {
+				// Create a FormData object to send files
+				const formData = new FormData();
+				uploadedFiles.forEach((file, index) => {
+					formData.append(`file${index}`, file);
+				});
 
-			const data = await response.json();
+				// Send files to the server
+				const response = await fetch("/api/process-files", {
+					method: "POST",
+					body: formData,
+				});
 
-			if (data.success) {
-				onUpload(values.content);
+				const data = await response.json();
+
+				if (data.success) {
+					// Use the extracted content from the files
+					onUpload(data.content);
+				} else {
+					setError(data.error || "Error processing files");
+				}
 			} else {
-				setError(data.error || "Error processing content");
+				// Process text content
+				const response = await fetch("/api/process-content", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({
+						content: values.content,
+						title: values.title || "Untitled",
+						source: values.source || "Unknown",
+					}),
+				});
+
+				const data = await response.json();
+
+				if (data.success) {
+					onUpload(values.content);
+				} else {
+					setError(data.error || "Error processing content");
+				}
 			}
 		} catch (error) {
 			console.error("Error:", error);
@@ -226,7 +266,8 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 			<CardHeader>
 				<CardTitle>Upload Educational Content</CardTitle>
 				<CardDescription>
-					Enter the text content you want to adapt for ESL learners.
+					Enter the text content or upload files you want to adapt for
+					ESL learners.
 				</CardDescription>
 			</CardHeader>
 
@@ -498,23 +539,26 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 
 						<div className="mt-6">
 							<div className="flex justify-between">
-								<Button
-									type="button"
-									variant="outline"
-									onClick={loadSampleContent}
-								>
-									<BookIcon className="h-4 w-4 mr-2" />
-									Load Sample Content
-								</Button>
+								{activeTab === "text" ? (
+									<Button
+										type="button"
+										variant="outline"
+										onClick={loadSampleContent}
+									>
+										<BookIcon className="h-4 w-4 mr-2" />
+										Load Sample Content
+									</Button>
+								) : (
+									<div>
+										{/* Empty div to maintain spacing */}
+									</div>
+								)}
 
 								<div>
 									<LimitedActionButton
 										actionName="Process Content"
 										onClick={form.handleSubmit(onSubmit)}
-										disabled={
-											!form.formState.isValid ||
-											!!fileError
-										}
+										disabled={!hasValidData()}
 									/>
 								</div>
 							</div>
