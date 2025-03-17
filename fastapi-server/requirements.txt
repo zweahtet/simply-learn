@@ -1,8 +1,12 @@
 fastapi[standard]
 uvicorn
+redis
+pymupdf
 pydantic
 pydantic-settings
 sqlalchemy
 qdrant-client[fastembed]
 sentence-transformers[onnx]
 huggingface_hub
+groq 
+transformers
