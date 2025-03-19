@@ -1,4 +1,4 @@
-# simply-learn/fastapi-server/services/embeddings.py
+# simply-learn/fastapi-server/utils/embeddings.py
 
 from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
 from core.config import settings

@@ -5,7 +5,7 @@ from typing import ClassVar
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from qdrant_client import QdrantClient, models
-from services.embeddings import dense_embedding_model, sparse_embedding_model, late_interaction_embedding_model
+from utils.embeddings import dense_embedding_model, sparse_embedding_model, late_interaction_embedding_model
 
 class QdrantVectorSpace:
     def __init__(self, collection_name: str):
