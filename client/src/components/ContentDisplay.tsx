@@ -1,6 +1,6 @@
 // simply-learn/client/src/components/ContentDisplay.tsx
 "use client";
-
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -28,6 +28,20 @@ export function ContentDisplay({
 	level,
 	onGenerateExercises,
 }: ContentDisplayProps) {
+	const [isLoading, setIsLoading] = useState(false);
+
+	const handleGenerateExercises = async () => {
+		setIsLoading(true);
+
+		try {
+			await onGenerateExercises();
+		} catch (error) {
+			console.error("Error generating exercises:", error);
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
 	return (
 		<div className="space-y-6">
 			<Card className="w-full max-w-4xl mx-auto">
@@ -86,8 +100,10 @@ export function ContentDisplay({
 				</Tabs>
 
 				<CardFooter className="flex justify-center mt-4">
-					<Button onClick={onGenerateExercises} size="lg">
-						Generate Practice Exercises
+					<Button onClick={handleGenerateExercises} size="lg">
+						{isLoading
+							? "Generating..."
+							: "Generate Practice Exercises"}
 					</Button>
 				</CardFooter>
 			</Card>

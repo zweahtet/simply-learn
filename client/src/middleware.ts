@@ -1,15 +1,15 @@
-// middleware.js
+// simply-learn/client/src/middleware.js
 import { NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rateLimit";
 
 // Paths that should be rate-limited
 const RATE_LIMITED_PATHS = [
     // "/api/submit-form",
-    // "/api/upload-file",
+    "/api/upload-file",
     // "/api/create-item",
     // Add any other paths that should be rate-limited
-    "/api/simplify-content",
-    "/api/generate-exercises",
+    // "/api/simplify-content",
+    // "/api/generate-exercises",
 ];
 
 export async function middleware(request: Request) {

@@ -32,11 +32,11 @@ export function LimitedActionButton({
 		async function fetchLimitInfo() {
 			try {
 				const response = await fetch("/api/limits");
-				if (response.ok) {
-					const data = await response.json();
-					setLimitInfo(data.limits);
-					setIsLimited(data.limits.remaining <= 0);
-				}
+				// if (response.ok) {
+				// 	const data = await response.json();
+				// 	setLimitInfo(data.limits);
+				// 	setIsLimited(data.limits.remaining <= 0);
+				// }
 			} catch (error) {
 				console.error("Error fetching rate limit info:", error);
 			}
@@ -60,11 +60,11 @@ export function LimitedActionButton({
 
 			// Refresh limit info
 			const response = await fetch("/api/limits");
-			if (response.ok) {
-				const data = await response.json();
-				setLimitInfo(data.limits);
-				setIsLimited(data.limits.remaining <= 0);
-			}
+			// if (response.ok) {
+			// 	const data = await response.json();
+			// 	setLimitInfo(data.limits);
+			// 	setIsLimited(data.limits.remaining <= 0);
+			// }
 		} catch (error) {
 			console.error("Error performing action:", error);
 		} finally {

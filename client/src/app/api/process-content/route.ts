@@ -16,10 +16,10 @@ const qdrantClient = new QdrantClient({
     apiKey: process.env.QDRANT_API_KEY
 });
 
-const embeddingModel = await pipeline('feature-extraction', 'mixedbread-ai/mxbai-embed-large-v1', {
-    cache_dir: './cache',
-    dtype: 'fp32',
-})
+// const embeddingModel = await pipeline('feature-extraction', 'mixedbread-ai/mxbai-embed-large-v1', {
+//     cache_dir: './cache',
+//     dtype: 'fp32',
+// })
 
 // Helper function to split content into chunks
 function splitContentIntoChunks(content: string, maxChunkSize = 500) {
