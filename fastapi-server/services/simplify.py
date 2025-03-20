@@ -136,8 +136,9 @@ class TextSimplificationAgent:
     #     # return sentence_splitter.split_text(text)
     #     return sentence_splitter.get_nodes_from_documents(documents=)
 
+    # TODO: completion token should have the size of the chunk
     def call_groq_llm(
-        self, prompt: str, temperature: float = 0.0, max_completion_tokens: int = 10000
+        self, prompt: str, temperature: float = 0.0, max_completion_tokens: int = 5000
     ) -> str:
         """Call Groq LLM with the given prompt and parameters."""
         try:
@@ -353,7 +354,7 @@ MISSING INFORMATION (be specific and concise):
         simplified_chunk: str,
         missing_elements: List[str],
         context_chunks: List[str],
-        cognitive_profile: Dict[str, int],
+        cognitive_profile: CognitiveProfile,
     ) -> str:
         """
         Reincorporate missing information in a cognitively appropriate way.
@@ -377,7 +378,7 @@ MISSING INFORMATION (be specific and concise):
 You are an expert in adapting text for people with different cognitive abilities.
 
 The following text has already been simplified for someone with this cognitive profile:
-{json.dumps(cognitive_profile, indent=2)}
+{cognitive_profile.model_dump_json(indent=2)}
 
 However, some important information has been lost during simplification. Your task is to
 reincorporate this missing information while maintaining the accessibility of the text.

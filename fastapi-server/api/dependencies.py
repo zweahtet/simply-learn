@@ -30,7 +30,7 @@ def get_current_user():
     # In a real application, this would extract the user from the request context
     # Here we return a dummy user for demonstration purposes
     profile = CognitiveProfile(
-        memory=3, attention=2, language=2, visual_spatial=4, executive=4
+        memory=3, attention=2, language=2, visuospatial=4, reasoning=4
     )
 
     return UserInDB(id="dummy_user_id", cognitive_profile=profile)

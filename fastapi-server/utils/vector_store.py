@@ -156,20 +156,18 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                 using="dense",
                 with_payload=True,
                 limit=n_results,
-                query_filter={
-                    models.Filter(
-                        must = [
-                            models.FieldCondition(
-                                key="user_id",
-                                match=models.MatchValue(value=filter.get("user_id")),
-                            ),
-                            models.FieldCondition(
-                                key="file_id",
-                                match=models.MatchValue(value=filter.get("file_id")),
-                            )
-                        ]
-                    )
-                },
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=filter.get("user_id")),
+                        ),
+                        models.FieldCondition(
+                            key="file_id",
+                            match=models.MatchValue(value=filter.get("file_id")),
+                        ),
+                    ]
+                ),
             )
 
             return [
