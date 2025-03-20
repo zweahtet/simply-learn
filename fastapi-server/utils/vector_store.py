@@ -1,10 +1,10 @@
 # simply-learn/fastapi-server/utils/vector_store.py
 import uuid
 from core.config import settings
-from typing import ClassVar, List, Optional
+from typing import ClassVar, List, Optional, Mapping
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
-from qdrant_client import QdrantClient, models
+from qdrant_client import models, QdrantClient
 from utils.embeddings import dense_embedding_model, sparse_embedding_model, late_interaction_embedding_model
 
 from llama_index.core.schema import Document as LlamaIndexDocument
@@ -19,24 +19,15 @@ def get_sentence_splitter(
         chunk_overlap=chunk_overlap,
         paragraph_separator="\n\n",
         include_metadata=True,
-        id_func=lambda x: str(uuid.uuid4()),
     )
 
     return sentence_splitter
-
-# vector_store = QdrantVectorStore(client=client, collection_name="paul_graham")
-# storage_context = StorageContext.from_defaults(vector_store=vector_store)
-# index = VectorStoreIndex.from_documents(
-#     documents,
-#     storage_context=storage_context,
-#     embed_model=dense_embedding_model,
-# )
 
 class QdrantVectorSpace:
     DEFAULT_TEXT_EMBED_DIMENSION: int = 1024
     DEFAULT_SPARSE_EMBED_DIMENSION: int = 128
     DEFAULT_LATE_INTERACTION_EMBED_DIMENSION: int = 128
-    
+
     DEFAULT_SIMILARITY_DISTANCE: models.Distance = models.Distance.COSINE
 
     def __init__(self, collection_name: str):
@@ -45,22 +36,16 @@ class QdrantVectorSpace:
             url=settings.QDRANT_HOST_URL,
             api_key=settings.QDRANT_API_KEY,
         )
-    
-    def check_collection_exists(self):
-        return self.client.collection_exists(
-            collection_name=self.collection_name
-        )
-    
-    def create_collection(self, vector_dimension: Optional[int] = None, distance: Optional[models.Distance] = None):        
-        self.client.create_collection(
-            collection_name=self.collection_name,
-            vectors_config=models.VectorParams(
-                size=vector_dimension or self.DEFAULT_TEXT_EMBED_DIMENSION,
-                distance=distance or self.DEFAULT_SIMILARITY_DISTANCE,
-            )
-        )
 
-    
+    def check_collection_exists(self):
+        return self.client.collection_exists(collection_name=self.collection_name)
+
+    # abstract method
+    # def create_collection(self):
+    #     """
+    #     Create a collection for the vector space.
+    #     """
+    #     raise NotImplementedError("Subclasses must implement create_collection")
 
 class YouTubeVideoItem(BaseModel):
     id: str
@@ -130,6 +115,24 @@ class AttachmentVectorSpace(QdrantVectorSpace):
     def __init__(self):
         super().__init__(collection_name=self.DEFAULT_COLLECTION_NAME)
 
+    def build_collection(self):
+        """
+        Create a predefined collection for attachments.
+        """
+        if not self.check_collection_exists():
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config={
+                    "dense": models.VectorParams(
+                        size=1024,
+                        distance=models.Distance.COSINE,
+                        quantization_config=models.BinaryQuantization(
+                            binary=models.BinaryQuantizationConfig(always_ram=True),
+                        ),
+                    )
+                },
+            )
+
     def store_document_in_vector_db(
         self, document: LlamaIndexDocument, chunk_size: int = 1000, overlap: int = 100
     ) -> List[str]:
@@ -150,11 +153,27 @@ class AttachmentVectorSpace(QdrantVectorSpace):
 
         doc_chunks = doc_splitter.get_nodes_from_documents([document])
 
-        chunk_ids = self.client.add(
-            collection_name=self.collection_name,
-            documents=[doc.text for doc in doc_chunks],
-            metadata=[doc.metadata for doc in doc_chunks]
+        # chunk_ids = self.client.add(
+        #     collection_name=self.collection_name,
+        #     documents=[doc.text for doc in doc_chunks],
+        #     metadata=[doc.metadata for doc in doc_chunks]
+        # )
+        points = []
+        for chunk in doc_chunks:
+            points.append(
+                models.PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector={
+                        "dense": next(dense_embedding_model.embed(documents=chunk.text))
+                    },
+                    # payload=chunk.metadata,
+                    payload={"document": chunk.text, **chunk.metadata},
+                )
+            )
+
+        # Store the points in the vector database
+        result = self.client.upsert(
+            collection_name=self.collection_name, points=points, wait=True
         )
-    
-        print(f"Stored {len(doc_chunks)} chunks in vector database")
-        return chunk_ids
+
+        print("upsert result:", result)

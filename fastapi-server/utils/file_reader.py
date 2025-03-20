@@ -80,4 +80,6 @@ class PDFMarkdownReader(BaseReader):
             "toc_items": str(doc.get("toc_items")),
         }
 
-        return extra_metadata.update(doc_metadata)
+        extra_metadata.update(doc_metadata)
+
+        return extra_metadata

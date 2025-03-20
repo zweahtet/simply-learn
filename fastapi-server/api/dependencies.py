@@ -3,6 +3,7 @@
 import redis
 from core.config import settings
 from typing import Annotated
+from fastapi import Depends
 
 from schemas import UserInDB
 
@@ -20,13 +21,15 @@ def get_redis_client():
     finally:
         client.close()  # Properly close Redis connection
 
-RedisDep = Annotated[redis.Redis, get_redis_client()]
+RedisDep = Annotated[redis.Redis, Depends(get_redis_client)]
+
 
 # User dependency injection
-def get_current_user() -> UserInDB:
+def get_current_user():
     """Dependency function to retrieve the current user from supabase"""
     # In a real application, this would extract the user from the request context
     # Here we return a dummy user for demonstration purposes
-    return UserInDB(id="dummy_user_id", cognitive_profile=None)
+    return UserInDB(id="dummy_user_id")
 
-CurrentActiveUserDep = Annotated[UserInDB, get_current_user()]
+
+CurrentActiveUserDep = Annotated[UserInDB, Depends(get_current_user)]
