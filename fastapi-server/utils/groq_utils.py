@@ -1,6 +1,13 @@
+import PIL
+import base64
+import io
+import pathlib
+from typing import Optional
 from groq import Groq
+import redis
 from core.config import settings
 from utils.defaults import GroqModels
+from schemas import CognitiveProfile, ChunkData
 
 groq_client = Groq(
     api_key=settings.GROQ_API_KEY,
@@ -16,11 +23,139 @@ Important Guidelines:
 * Be specific: Use precise language to describe shapes, colors, textures, and any interactions depicted.
 * Consider context: If the image is a screenshot or contains text, incorporate that information into your description.
 """
-import PIL
-import base64
-import io
-import pathlib
-from typing import Optional
+
+
+# def generate_adaptation_prompt(
+#     level: str, cognitive_profile: CognitiveProfile = None
+# ) -> str:
+#     # Base prompt for language level
+#     base_prompt = f"""You are an educational content adapter for ESL students at {level} CEFR level. 
+#     Your task is to transform educational content to be more accessible while preserving all key information.
+#     Use vocabulary and sentence structures appropriate for the {level} proficiency level."""
+
+#     # Customizations based on cognitive profile
+#     customizations = []
+#     formatting = []
+
+#     # Memory adaptations
+#     if cognitive_profile.memory <= 3:
+#         customizations.append(
+#             """
+#             The learner has difficulty with memory, so:
+#             - Repeat key terms multiple times
+#             - Use mnemonic devices where possible
+#             - Create clear associations between new terms and familiar concepts"""
+#         )
+
+#         formatting.append(
+#             """
+#             - Create a "Key Terms" box at the end of each section to reinforce vocabulary
+#             - Use bullet points for lists rather than embedding them in paragraphs"""
+#         )
+#     elif cognitive_profile.memory >= 7:
+#         customizations.append(
+#             """
+#             The learner has strong memory abilities, so:
+#             - Feel free to introduce new vocabulary with proper context
+#             - Use recall questions to reinforce learning"""
+#         )
+
+#     # Attention adaptations
+#     if cognitive_profile.attention <= 3:
+#         customizations.append(
+#             """
+#             The learner has limited attention span, so:
+#             - Keep paragraphs very short (3-4 sentences maximum)
+#             - Break content into many small, focused sections
+#             - Use frequent subheadings to structure content"""
+#         )
+
+#         formatting.append(
+#             """
+#             - Add a "Summary" after every 2-3 paragraphs
+#             - Use visual markers like ⚠️ or 🔑 to highlight important points"""
+#         )
+#     elif cognitive_profile.attention >= 7:
+#         customizations.append(
+#             """
+#             The learner has strong attention abilities, so:
+#             - You can present longer, cohesive sections of content
+#             - Include more detailed explanations where relevant"""
+#         )
+
+#     # Language processing adaptations
+#     if cognitive_profile.language <= 3:
+#         customizations.append(
+#             """
+#             The learner needs additional language support, so:
+#             - Use very simple sentence structures (subject-verb-object)
+#             - Avoid idioms, phrasal verbs, and figurative language
+#             - Define terms immediately when introduced"""
+#         )
+
+#         formatting.append(
+#             """
+#             - Present definitions in parentheses right after introducing a term
+#             - Use simple illustrations or diagrams where possible"""
+#         )
+#     elif cognitive_profile.language >= 7:
+#         customizations.append(
+#             """
+#             The learner has strong language abilities for their level, so:
+#             - You can use more complex sentence structures within their level
+#             - Introduce some common idiomatic expressions with explanations"""
+#         )
+
+#     # Executive function adaptations
+#     if cognitive_profile.executive <= 3:
+#         customizations.append(
+#             """
+#             The learner may need support with concepts and reasoning, so:
+#             - Break complex concepts into explicit steps
+#             - Provide concrete examples for abstract ideas
+#             - Use clear cause-effect language"""
+#         )
+
+#         formatting.append(
+#             """
+#             - Use numbered lists for processes or sequences
+#             - Create "If-Then" statements for conditional content"""
+#         )
+#     elif cognitive_profile.executive >= 7:
+#         customizations.append(
+#             """
+#             The learner has strong reasoning abilities, so:
+#             - Present challenging concept relationships
+#             - Include questions that require synthesis of information"""
+#         )
+
+#     # Combine the base prompt with customizations
+#     final_prompt = base_prompt
+
+#     if customizations:
+#         final_prompt += (
+#             "\n\nBased on the learner's cognitive profile, make these adjustments:"
+#             + "".join(customizations)
+#         )
+
+#     if formatting:
+#         final_prompt += "\n\nUse these formatting approaches:" + "".join(formatting)
+
+#     # Add HTML formatting instructions
+#     final_prompt += f"""
+#     Format your response with HTML:
+#     - Important terms should be wrapped in <strong> tags
+#     - Use <p> tags for paragraphs
+#     - Use <h3> tags for section headings
+#     - Use <ul> and <li> tags for lists
+#     - If creating a key terms box, use <div class="key-terms"> to wrap it
+#     - If creating a summary, use <div class="summary"> to wrap it
+    
+#     Preserve all key information while making the text accessible to a {level} level English learner with the specific cognitive profile described.
+#     """.strip()
+
+#     return final_prompt
+
 
 class Image:
     """The image that can be sent to a generative model."""
@@ -115,3 +250,58 @@ def get_image_description_from_groq(
     )
 
     return chat_completion.choices[0].message.content
+
+
+# async def adapt_chunk(
+#     chunk: ChunkData, level: str, profile: CognitiveProfile, redis_client: redis.Redis
+# ) -> ChunkData:
+#     """Adapt a chunk of content using Groq"""
+#     # Generate cache key
+#     cache_key = f"adapt:{chunk.id}:{level}:{profile.memory}:{profile.attention}:{profile.language}:{profile.visual_spatial}:{profile.executive}"
+
+#     # Check cache first
+#     cached_content = redis_client.get(cache_key)
+#     if cached_content:
+#         chunk.adapted_content = cached_content
+#         chunk.is_adapted = True
+#         return chunk
+
+#     try:
+#         # Determine context to include (useful for maintaining coherence)
+#         context = f"This is part of a larger document. "
+#         if chunk.metadata and "context" in chunk.metadata:
+#             context += chunk.metadata["context"]
+
+#         # Regular text content
+#         system_prompt = generate_adaptation_prompt(level, profile)
+#         content_to_adapt = chunk.content
+
+#         # Call LLM for adaptation
+#         response = groq_client.chat.completions.create(
+#             model="llama-3.2-70b-versatile",  # Using a versatile model
+#             messages=[
+#                 {"role": "system", "content": system_prompt},
+#                 {"role": "user", "content": f"{context}\n\n{content_to_adapt}"},
+#             ],
+#             temperature=0.3,
+#             max_tokens=1000,
+#         )
+
+#         adapted_content = response.choices[0].message.content
+
+#         # Store in cache
+#         redis_client.set(cache_key, adapted_content, ex=CACHE_TTL)
+
+#         # Update chunk
+#         chunk.adaptedContent = adapted_content
+#         chunk.isAdapted = True
+
+#     except Exception as e:
+#         print(f"Error adapting chunk {chunk.id}: {e}")
+#         # In case of error, return original content with an error flag
+#         chunk.adaptedContent = chunk.content
+#         chunk.isAdapted = False
+#         chunk.metadata = chunk.metadata or {}
+#         chunk.metadata["error"] = str(e)
+
+#     return chunk

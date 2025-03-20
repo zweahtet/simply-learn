@@ -2,15 +2,36 @@ import json
 import uuid
 import time
 import groq
+from pathlib import Path
+
+
+from qdrant_client import QdrantClient
 from typing import List, Dict, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 from tiktoken import get_encoding
 from llama_index.core.node_parser import SentenceSplitter
 
+from core.config import settings
 from utils.defaults import GroqModels
+from utils.embeddings import dense_embedding_model
 
 # Tiktoken encoder for token counting
 encoder = get_encoding("cl100k_base")
+
+# Initialize Groq client
+groq_client = groq.Client(
+    api_key=settings.GROQ_API_KEY,
+)
+
+# Initialize Qdrant client
+qdrant_client = QdrantClient(
+    url=settings.QDRANT_HOST_URL,
+    api_key=settings.QDRANT_API_KEY,
+)
+qdrant_client.set_model(
+    embedding_model_name=dense_embedding_model.model_name,
+    cache_dir=settings.FASTEMBED_MODELS_CACHE_DIR,
+)
 
 DEFAULT_MODEL = GroqModels.LLAMA_3_70B_VERSATILE.value
 
@@ -34,9 +55,17 @@ class TextSimplificationAgent:
         if collection_name is None:
             collection_name = f"doc_chunks_{uuid.uuid4().hex[:8]}"
 
-        self.collection = chroma_client.get_or_create_collection(
-            name=collection_name, embedding_function=embedding_function
-        )
+        # self.collection = chroma_client.get_or_create_collection(
+        #     name=collection_name, embedding_function=embedding_function
+        # )
+        if not qdrant_client.collection_exists(collection_name):
+            print(f"Creating new collection: {collection_name}")
+            qdrant_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=qdrant_client.get_fastembed_vector_params(),
+            )
+
+        self.collection_name = collection_name
 
         if self.verbose:
             print(f"Initialized agent with collection: {collection_name}")
@@ -56,16 +85,21 @@ class TextSimplificationAgent:
             return [text]
 
         sentence_splitter = SentenceSplitter(
-            chunk_size=chunk_size, chunk_overlap=overlap, paragraph_separator="\n\n"
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            paragraph_separator="\n\n",
+            include_metadata=True,
+            id_func=lambda x: str(uuid.uuid4()),
         )
-        return sentence_splitter.split_text(text)
+        # return sentence_splitter.split_text(text)
+        return sentence_splitter.get_nodes_from_documents(documents=)
 
     def call_groq_llm(
         self, prompt: str, temperature: float = 0.0, max_tokens: int = 1024
     ) -> str:
         """Call Groq LLM with the given prompt and parameters."""
         try:
-            response = client.chat.completions.create(
+            response = groq_client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
@@ -77,7 +111,7 @@ class TextSimplificationAgent:
             # Simple retry logic
             try:
                 time.sleep(2)  # Wait before retry
-                response = client.chat.completions.create(
+                response = groq_client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
@@ -87,40 +121,6 @@ class TextSimplificationAgent:
             except Exception as retry_error:
                 self.log(f"Retry failed: {retry_error}")
                 raise
-
-    def store_document_in_vector_db(
-        self, document: str, chunk_size: int = 1000, overlap: int = 100
-    ) -> List[str]:
-        """
-        Split document into small chunks and store in vector database.
-
-        Args:
-            document: Document to store
-            chunk_size: Size of each chunk in tokens
-            overlap: Overlap between chunks in tokens
-
-        Returns:
-            List of chunk IDs
-        """
-        # Use smaller chunks for the vector DB than for processing
-        # This allows for more granular retrieval
-        chunks = self.split_text_into_chunks(document, chunk_size, overlap)
-
-        # Store chunks in the vector database
-        chunk_ids = []
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"chunk_{i}"
-
-            self.collection.add(
-                documents=[chunk],
-                metadatas=[{"index": i, "original": True}],
-                ids=[chunk_id],
-            )
-
-            chunk_ids.append(chunk_id)
-
-        self.log(f"Stored {len(chunks)} chunks in vector database")
-        return chunk_ids
 
     def validate_cognitive_profile(self, profile: Dict[str, int]) -> Dict[str, int]:
         """
@@ -519,3 +519,18 @@ CONSISTENT DOCUMENT:
         final_document = self.call_groq_llm(consistency_prompt, max_tokens=2048)
 
         return final_document
+
+    def process_document_from_file(self, file_path: Path, cognitive_profile: CognitiveProfile, verbose: bool = False) -> str:
+        """
+        Process a document from a file for a specific cognitive profile.
+
+        Args:
+            file_path: Path to the document file
+            cognitive_profile: Dictionary with cognitive domains and levels
+            verbose: Whether to print progress information
+            **kwargs: Additional arguments for the agent's process_document method
+
+        Returns:
+            Processed document
+        """
+        return

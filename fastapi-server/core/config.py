@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str
 
     # Qdrant
-    QDRANT_URL: str
+    QDRANT_HOST_URL: str
     QDRANT_API_KEY: str
 
     # HuggingFace

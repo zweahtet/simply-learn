@@ -17,18 +17,6 @@ CHUNK_SIZE = 1000  # Characters per text chunk
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-class ChunkData(BaseModel):
-    id: str
-    content: str
-    page: int
-    order: int
-    type: str = "text"  # text, image, table
-    originalContent: Optional[str] = None
-    adaptedContent: Optional[str] = None
-    isAdapted: bool = False
-    metadata: Optional[Dict[str, Any]] = None
-
-
 def extract_text_chunks(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
     """Split text into semantic chunks (paragraphs or sections)"""
     # First split by paragraphs
