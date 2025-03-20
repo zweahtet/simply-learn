@@ -1,7 +1,7 @@
 # simply-learn/fastapi-server/utils/vector_store.py
 import uuid
 from core.config import settings
-from typing import ClassVar, List, Optional, Mapping
+from typing import ClassVar, List, Optional, Mapping, Iterable
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from qdrant_client import models, QdrantClient
@@ -133,47 +133,65 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                 },
             )
 
-    def store_document_in_vector_db(
-        self, document: LlamaIndexDocument, chunk_size: int = 1000, overlap: int = 100
+    def store_documents_in_vector_db(
+        self,
+        documents: List[LlamaIndexDocument],
+        batch_size: int = 5,
+        parallel: int = 4,
     ) -> List[str]:
         """
         Split document into small chunks and store in vector database.
 
         Args:
-            document: Document to store
-            chunk_size: Size of each chunk in tokens
-            overlap: Overlap between chunks in tokens
+            documents (Iterable[LlamaIndexDocument]): List of documents to be stored in vector database.
+            batch_size (int): Number of documents to be processed in parallel.
+            parallel (int): Number of parallel processes to be used.
 
         Returns:
             List of chunk IDs
         """
-        # Use smaller chunks for the vector DB than for processing
-        # This allows for more granular retrieval
-        doc_splitter = get_sentence_splitter(chunk_size=chunk_size, chunk_overlap=overlap)
+        try:
+            # Use smaller chunks for the vector DB than for processing
+            # This allows for more granular retrieval
+            doc_splitter = get_sentence_splitter()
+            doc_chunks = doc_splitter.get_nodes_from_documents(documents)
 
-        doc_chunks = doc_splitter.get_nodes_from_documents([document])
-
-        # chunk_ids = self.client.add(
-        #     collection_name=self.collection_name,
-        #     documents=[doc.text for doc in doc_chunks],
-        #     metadata=[doc.metadata for doc in doc_chunks]
-        # )
-        points = []
-        for chunk in doc_chunks:
-            points.append(
-                models.PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector={
-                        "dense": next(dense_embedding_model.embed(documents=chunk.text))
-                    },
-                    # payload=chunk.metadata,
-                    payload={"document": chunk.text, **chunk.metadata},
+            points: List[models.PointStruct] = []
+            for chunk in doc_chunks:
+                points.append(
+                    models.PointStruct(
+                        id=str(uuid.uuid4()),
+                        vector={
+                            "dense": next(
+                                dense_embedding_model.embed(
+                                    documents=chunk.get_content("embed")
+                                )
+                            )
+                        },
+                        # payload=chunk.metadata,
+                        payload={
+                            "document": chunk.get_content(),
+                            **chunk.metadata,
+                        },
+                    )
                 )
+
+            # Store the points in the vector database
+            self.client.upload_points(
+                collection_name=self.collection_name,
+                points=points,
+                batch_size=10,
+                parallel=4,
+                max_retries=3,
+                wait=True,
             )
 
-        # Store the points in the vector database
-        result = self.client.upsert(
-            collection_name=self.collection_name, points=points, wait=True
-        )
-
-        print("upsert result:", result)
+            return [point.id for point in points]
+        except Exception as e:
+            print(f"Error storing documents in vector DB: {e}")
+            raise SystemError(f"Error storing documents in vector DB: {e}")
+        finally:
+            # Clean up the document chunks
+            del doc_chunks
+            del doc_splitter
+            del points

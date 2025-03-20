@@ -58,13 +58,6 @@ class PDFMarkdownReader(BaseReader):
         ]
 
         return llama_index_docs
-        # for page in pages:
-        #     yield LlamaIndexDocument(
-        #         text=page["text"],
-        #         metadata=self._extract_doc_meta(page, extra_metadata),
-        #         text_template="Metadata: {metadata_str}\n-----\nContent: {content}",
-        #         excluded_embed_metadata_keys=["user_id"],
-        #     )
 
     def _extract_doc_meta(
         self,
