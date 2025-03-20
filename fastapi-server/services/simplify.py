@@ -10,10 +10,13 @@ from typing import List, Dict, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 from tiktoken import get_encoding
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.schema import Document as LlamaIndexDocument
 
 from core.config import settings
 from utils.defaults import GroqModels
 from utils.embeddings import dense_embedding_model
+from utils.text_splitter import get_sentence_splitter
+from utils.vector_store import AttachmentVectorSpace
 
 # Tiktoken encoder for token counting
 encoder = get_encoding("cl100k_base")
@@ -33,7 +36,7 @@ qdrant_client.set_model(
     cache_dir=settings.FASTEMBED_MODELS_CACHE_DIR,
 )
 
-DEFAULT_MODEL = GroqModels.LLAMA_3_70B_VERSATILE.value
+DEFAULT_MODEL = GroqModels.LLAMA_3_70B_VERSATILE.value  # 32,768 max completion tokens
 
 # Cognitive domains in the 5-cog approach
 COGNITIVE_DOMAINS = ["attention", "memory", "visuospatial", "language", "reasoning"]
@@ -44,31 +47,23 @@ class TextSimplificationAgent:
 
     def __init__(
         self,
+        user_id: str,
+        file_id: str,
         model: str = DEFAULT_MODEL,
         verbose: bool = False,
-        collection_name: Optional[str] = None,
     ):
         self.model = model
         self.verbose = verbose
+        self.attachment_vector_space = AttachmentVectorSpace(user_id=user_id)
+        self.file_id = file_id
 
         # Create or get ChromaDB collection
-        if collection_name is None:
-            collection_name = f"doc_chunks_{uuid.uuid4().hex[:8]}"
+        # if collection_name is None:
+        #     collection_name = f"doc_chunks_{uuid.uuid4().hex[:8]}"
 
         # self.collection = chroma_client.get_or_create_collection(
         #     name=collection_name, embedding_function=embedding_function
         # )
-        if not qdrant_client.collection_exists(collection_name):
-            print(f"Creating new collection: {collection_name}")
-            qdrant_client.create_collection(
-                collection_name=collection_name,
-                vectors_config=qdrant_client.get_fastembed_vector_params(),
-            )
-
-        self.collection_name = collection_name
-
-        if self.verbose:
-            print(f"Initialized agent with collection: {collection_name}")
 
     def log(self, message: str):
         """Print log message if verbose mode is enabled."""
@@ -79,23 +74,23 @@ class TextSimplificationAgent:
         """Count the number of tokens in a text string."""
         return len(encoder.encode(text))
 
-    def split_text_into_chunks(self, text: str, chunk_size: int = 4000, overlap: int = 100) -> List[str]:
-        """Split text into chunks of approximately chunk_size tokens with overlap."""
-        if self.num_tokens(text) <= chunk_size:
-            return [text]
+    # def split_text_into_chunks(self, text: str, chunk_size: int = 4000, overlap: int = 100) -> List[str]:
+    #     """Split text into chunks of approximately chunk_size tokens with overlap."""
+    #     if self.num_tokens(text) <= chunk_size:
+    #         return [text]
 
-        sentence_splitter = SentenceSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=overlap,
-            paragraph_separator="\n\n",
-            include_metadata=True,
-            id_func=lambda x: str(uuid.uuid4()),
-        )
-        # return sentence_splitter.split_text(text)
-        return sentence_splitter.get_nodes_from_documents(documents=)
+    #     sentence_splitter = SentenceSplitter(
+    #         chunk_size=chunk_size,
+    #         chunk_overlap=overlap,
+    #         paragraph_separator="\n\n",
+    #         include_metadata=True,
+    #         id_func=lambda x: str(uuid.uuid4()),
+    #     )
+    #     # return sentence_splitter.split_text(text)
+    #     return sentence_splitter.get_nodes_from_documents(documents=)
 
     def call_groq_llm(
-        self, prompt: str, temperature: float = 0.0, max_tokens: int = 1024
+        self, prompt: str, temperature: float = 0.0, max_completion_tokens: int = 10000
     ) -> str:
         """Call Groq LLM with the given prompt and parameters."""
         try:
@@ -103,7 +98,7 @@ class TextSimplificationAgent:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_completion_tokens,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -115,7 +110,7 @@ class TextSimplificationAgent:
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_completion_tokens=max_completion_tokens,
                 )
                 return response.choices[0].message.content
             except Exception as retry_error:
@@ -268,12 +263,15 @@ MISSING INFORMATION (be specific and concise):
         return True, missing_elements
 
     def retrieve_relevant_context(
-        self, missing_elements: List[str], top_k: int = 3
+        self,
+        missing_elements: List[str],
+        top_k: int = 3,
     ) -> List[str]:
         """
         Retrieve relevant context from vector DB for the missing elements.
 
         Args:
+            file_id: ID of the file to retrieve from
             missing_elements: List of missing information elements
             top_k: Number of most relevant chunks to retrieve
 
@@ -284,15 +282,20 @@ MISSING INFORMATION (be specific and concise):
         query = " ".join(missing_elements)
 
         # Query the vector database
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=top_k,
-            where={"original": True},  # Only retrieve from original document
+        # results = self.collection.query(
+        #     query_texts=[query],
+        #     n_results=top_k,
+        #     where={"original": True},  # Only retrieve from original document
+        # )
+        results = self.attachment_vector_space.retrieve_documents(
+            query=query, n_results=top_k, filter={"file_id": self.file_id}
         )
 
         # Extract the relevant chunks
-        if results and "documents" in results and results["documents"]:
-            return results["documents"][0]  # First query result, all documents
+        # if results and "documents" in results and results["documents"]:
+        #     return results["documents"][0]  # First query result, all documents
+        if results:
+            return [doc.get_content("embed") for doc in results]
 
         return []
 
@@ -348,7 +351,7 @@ Please update the simplified text to include the missing information in a way th
 UPDATED SIMPLIFIED TEXT:
 """
 
-        return self.call_groq_llm(prompt, max_tokens=1500)
+        return self.call_groq_llm(prompt)
 
     def simplify_text_for_cognitive_domain(
         self, text: str, domain: str, level: int
@@ -365,7 +368,7 @@ UPDATED SIMPLIFIED TEXT:
             Simplified text
         """
         prompt = self.get_domain_prompt(domain, level, text)
-        return self.call_groq_llm(prompt, max_tokens=1500)
+        return self.call_groq_llm(prompt)
 
     def process_chunk_with_context_retrieval(
         self, original_chunk: str, cognitive_profile: Dict[str, int], chunk_index: int
@@ -424,9 +427,9 @@ UPDATED SIMPLIFIED TEXT:
 
         return current_text
 
-    def process_document(
+    def process_documents(
         self,
-        document: str,
+        documents: List[LlamaIndexDocument],
         cognitive_profile: Dict[str, int],
         chunk_size: int = 4000,
         chunk_overlap: int = 100,
@@ -452,17 +455,22 @@ UPDATED SIMPLIFIED TEXT:
         # Identify domains that need simplification (level < 5)
         domains_to_simplify = [domain for domain, level in profile.items() if level < 5]
 
-        if not domains_to_simplify:
-            self.log("No simplification needed - all cognitive domains at level 5")
-            return document
+        # if not domains_to_simplify:
+        #     self.log("No simplification needed - all cognitive domains at level 5")
+        #     return document
 
         self.log(f"Simplifying for domains: {', '.join(domains_to_simplify)}")
 
-        # 1. Store document in vector database (using smaller chunks)
-        self.store_document_in_vector_db(document, chunk_size=1000, overlap=200)
+        # # 1. Store document in vector database (using smaller chunks)
+        # self.store_document_in_vector_db(document, chunk_size=1000, overlap=200)
 
         # 2. Split document into processing chunks
-        chunks = self.split_text_into_chunks(document, chunk_size, chunk_overlap)
+        # Use a sentence splitter to create chunks
+        splitter = get_sentence_splitter(
+            chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
+        # chunks = self.split_text_into_chunks(document, chunk_size, chunk_overlap)
+        chunks = splitter.get_nodes_from_documents(documents)
         self.log(f"Split into {len(chunks)} processing chunks")
 
         # 3. Process each chunk with context retrieval
@@ -473,7 +481,10 @@ UPDATED SIMPLIFIED TEXT:
             # Create futures
             futures = [
                 executor.submit(
-                    self.process_chunk_with_context_retrieval, chunk, profile, i
+                    self.process_chunk_with_context_retrieval,
+                    chunk.get_content("embed"),
+                    profile,
+                    i,
                 )
                 for i, chunk in enumerate(chunks)
             ]
@@ -516,21 +527,6 @@ CONSISTENT DOCUMENT:
             )
             return simplified_document
 
-        final_document = self.call_groq_llm(consistency_prompt, max_tokens=2048)
+        final_document = self.call_groq_llm(consistency_prompt)
 
         return final_document
-
-    def process_document_from_file(self, file_path: Path, cognitive_profile: CognitiveProfile, verbose: bool = False) -> str:
-        """
-        Process a document from a file for a specific cognitive profile.
-
-        Args:
-            file_path: Path to the document file
-            cognitive_profile: Dictionary with cognitive domains and levels
-            verbose: Whether to print progress information
-            **kwargs: Additional arguments for the agent's process_document method
-
-        Returns:
-            Processed document
-        """
-        return

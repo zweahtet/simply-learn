@@ -12,6 +12,7 @@ from typing import Optional, Union, List, Dict, Any, Annotated
 from pydantic import BaseModel
 from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import JSONResponse
+from services.simplify import TextSimplificationAgent
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from schemas import ChunkData, CognitiveProfile
@@ -189,27 +190,33 @@ async def process_file(
         reader = PDFMarkdownReader()
 
         # load pages into llama index documents
-        docs = reader.load_data(file_path, image_path, {"user_id": current_user.id})
+        page_docs = reader.load_data(file_path, image_path, {"user_id": current_user.id})
 
-        attachment_vs = AttachmentVectorSpace()
-
-        # Store document in vector database
-        # TODO: pass the iterable docs in this method
-        # for doc in docs:
-        #     attachment_vs.store_document_in_vector_db(doc)
         # Store documents in vector database
-        ids = attachment_vs.store_documents_in_vector_db(docs)
+        attachment_vs = AttachmentVectorSpace()
+        ids = attachment_vs.store_documents_in_vector_db(page_docs)
 
         # (assuming that documents are stored in vector)
         # Start background processing of chunks
+        # Add the simplification as a background task
+        simplifier = TextSimplificationAgent(
+            user_id=current_user.id,
+            file_id=file_id,
+            verbose=True
+        )
+
+        background_tasks.add_task(
+            simplifier.process_documents,
+            documents=page_docs,
+            cognitive_profile=current_user.cognitive_profile,
+        )
 
         return JSONResponse(
             content={
                 "fileId": file_id,
                 "filename": file_name,
                 "title": file.filename,
-                "totalPages": len(docs),
-                "processedAt": time.time(),
+                "totalPages": len(page_docs),
             },
             status_code=status.HTTP_201_CREATED,
         )

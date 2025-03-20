@@ -6,22 +6,8 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from qdrant_client import models, QdrantClient
 from utils.embeddings import dense_embedding_model, sparse_embedding_model, late_interaction_embedding_model
-
+from utils.text_splitter import get_sentence_splitter
 from llama_index.core.schema import Document as LlamaIndexDocument
-from llama_index.core.text_splitter import SentenceSplitter
-
-
-def get_sentence_splitter(
-    chunk_size: int = 1000, chunk_overlap: int = 100
-) -> SentenceSplitter:
-    sentence_splitter = SentenceSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        paragraph_separator="\n\n",
-        include_metadata=True,
-    )
-
-    return sentence_splitter
 
 class QdrantVectorSpace:
     DEFAULT_TEXT_EMBED_DIMENSION: int = 1024
@@ -36,6 +22,12 @@ class QdrantVectorSpace:
             url=settings.QDRANT_HOST_URL,
             api_key=settings.QDRANT_API_KEY,
         )
+
+    def get_collection_name(self):
+        return self.collection_name
+
+    def get_collection_info(self):
+        return self.client.get_collection(collection_name=self.collection_name)
 
     def check_collection_exists(self):
         return self.client.collection_exists(collection_name=self.collection_name)
@@ -112,7 +104,13 @@ class YouTubeVectorSpace(QdrantVectorSpace):
 class AttachmentVectorSpace(QdrantVectorSpace):
     DEFAULT_COLLECTION_NAME = "attachments"
 
-    def __init__(self):
+    def __init__(self, user_id: str):
+        """
+        Initialize the vector space for attachments.
+        Args:
+            user_id (str): User ID for the vector space.
+        """
+        self.user_id = user_id
         super().__init__(collection_name=self.DEFAULT_COLLECTION_NAME)
 
     def build_collection(self):
@@ -132,6 +130,62 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                     )
                 },
             )
+
+    def retrieve_documents(
+        self,
+        query: str,
+        n_results: int = 5,
+        filter: Optional[Mapping] = None,
+    ):
+        """
+        Retrieve documents from the vector database based on the query.
+
+        Args:
+            query (str): The query string.
+            n_results (int): The number of results to return.
+            filter (Optional[Mapping]): Optional filter for the query.
+
+        Returns:
+            List of documents matching the query.
+        """
+        try:
+            # Use dense embedding model for retrieval
+            dense_vectors = next(dense_embedding_model.query_embed(query))
+
+            # Perform the query
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=dense_vectors,
+                using="dense",
+                with_payload=True,
+                limit=n_results,
+                query_filter={
+                    models.Filter(
+                        must = [
+                            models.FieldCondition(
+                                key="user_id",
+                                match=models.MatchValue(value=self.user_id),
+                            ),
+                            models.FieldCondition(
+                                key="file_id",
+                                match=models.MatchValue(value=filter.get("file_id")),
+                            )
+                        ]
+                    )
+                },
+            )
+
+            return [
+                LlamaIndexDocument(
+                    id=result.id,
+                    text=result.payload.get("document"),
+                    metadata=result.payload,
+                )
+                for result in response.points
+            ]
+        except Exception as e:
+            print(f"Error retrieving documents: {e}")
+            raise SystemError(f"Error retrieving documents: {e}")
 
     def store_documents_in_vector_db(
         self,
