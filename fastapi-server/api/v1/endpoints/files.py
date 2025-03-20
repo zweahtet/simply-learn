@@ -155,14 +155,23 @@ async def process_file(
     # file.file.seek(0)
 
     # Create a unique ID for this file
-    file_id = str(uuid.uuid4())[:8] # Shorten UUID for easier handling
+    file_id = uuid.uuid4().hex[:8]  # Shortened UUID for simplicity
 
     # Senatize file name
-    file_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
+    file_name: str = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
+
+    # Cut off the file name if it exceeds 255 characters
+    if len(file_name) > 255:
+        file_name = file_name[:255]
 
     # Create a unique file path
-    file_path = pathlib.Path(f"{FILE_UPLOAD_DIR}/{current_user.id}/{file_id}_{file_name}")
-    image_path = pathlib.Path(f"{IMAGE_DIR}/{current_user.id}/{file_id}_{file_name}")
+    # Create a more organized directory structure
+    # Main user directory with file-specific subdirectory
+    user_file_dir = pathlib.Path(f"{FILE_UPLOAD_DIR}/{current_user.id}/files/{file_id}")
+
+    # Define file path and image directory
+    file_path = pathlib.Path(user_file_dir / file_name)
+    image_path = user_file_dir / "images"
 
     try:
         # Check if the file already exists
@@ -172,21 +181,26 @@ async def process_file(
 
         # Create directories if they don't exist
         os.makedirs(file_path.parent, exist_ok=True)
-        os.makedirs(image_path.parent, exist_ok=True)
 
         # Save the file
         with open(file_path, "wb") as f:
             f.write(await file.read())
 
         reader = PDFMarkdownReader()
+
+        # load pages into llama index documents
         docs = reader.load_data(file_path, image_path, {"user_id": current_user.id})
 
         attachment_vs = AttachmentVectorSpace()
 
         # Store document in vector database
-        for doc in docs:
-            attachment_vs.store_document_in_vector_db(doc)
+        # TODO: pass the iterable docs in this method
+        # for doc in docs:
+        #     attachment_vs.store_document_in_vector_db(doc)
+        # Store documents in vector database
+        ids = attachment_vs.store_documents_in_vector_db(docs)
 
+        # (assuming that documents are stored in vector)
         # Start background processing of chunks
 
         return JSONResponse(
