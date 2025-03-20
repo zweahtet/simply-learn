@@ -10,9 +10,9 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union, List, Dict, Any, Annotated
 from pydantic import BaseModel
-from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import JSONResponse
-from services.simplify import TextSimplificationAgent
+from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from services.simplify import TextSimplificationAgent, simplification_progress
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from schemas import ChunkData, CognitiveProfile
@@ -127,3 +127,36 @@ async def process_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing file: {str(e)}",
         )
+
+
+@router.get("/simplification-progress/{file_id}")
+async def get_simplification_progress(request: Request, file_id: str):
+    """
+    Stream document simplification progress using Server-Sent Events
+    """
+
+    async def event_generator():
+        while True:
+            # Check if client disconnected
+            if await request.is_disconnected():
+                break
+
+            # Get current progress
+            progress = simplification_progress.get_progress(file_id)
+
+            if not progress:
+                # File not found or processing hasn't started
+                yield f"data: {json.dumps({'status': 'not_found'})}\n\n"
+                await asyncio.sleep(1)
+                continue
+
+            # Send current progress
+            yield f"data: {json.dumps(progress)}\n\n"
+
+            # If completed or error, break the loop
+            if progress["completed"] or progress["error"]:
+                break
+
+            await asyncio.sleep(0.5)  # Update every 500ms
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

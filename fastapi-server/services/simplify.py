@@ -7,7 +7,7 @@ from pathlib import Path
 
 from qdrant_client import QdrantClient
 from typing import List, Dict, Tuple, Optional
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
 from tiktoken import get_encoding
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import Document as LlamaIndexDocument
@@ -17,6 +17,7 @@ from utils.defaults import GroqModels
 from utils.embeddings import dense_embedding_model
 from utils.text_splitter import get_sentence_splitter
 from utils.vector_store import AttachmentVectorSpace
+from schemas import CognitiveProfile
 
 # Tiktoken encoder for token counting
 encoder = get_encoding("cl100k_base")
@@ -42,6 +43,51 @@ DEFAULT_MODEL = GroqModels.LLAMA_3_70B_VERSATILE.value  # 32,768 max completion 
 COGNITIVE_DOMAINS = ["attention", "memory", "visuospatial", "language", "reasoning"]
 
 
+class SimplificationProgress:
+    """Tracks simplification progress and provides updates"""
+
+    def __init__(self):
+        self.progress = {}
+
+    def create_task(self, file_id, total_chunks):
+        """Initialize a new simplification task"""
+        self.progress[file_id] = {
+            "total_chunks": total_chunks,
+            "processed_chunks": 0,
+            "simplified_chunks": {},
+            "completed": False,
+            "error": None,
+        }
+
+    def update_chunk(self, file_id, chunk_index, simplified_content):
+        """Update a simplified chunk"""
+        if file_id not in self.progress:
+            return
+
+        self.progress[file_id]["simplified_chunks"][chunk_index] = simplified_content
+        self.progress[file_id]["processed_chunks"] += 1
+
+        if (
+            self.progress[file_id]["processed_chunks"]
+            >= self.progress[file_id]["total_chunks"]
+        ):
+            self.progress[file_id]["completed"] = True
+
+    def get_progress(self, file_id):
+        """Get current progress for a file"""
+        if file_id not in self.progress:
+            return None
+        return self.progress[file_id]
+
+    def set_error(self, file_id, error_message):
+        """Set error for a file"""
+        if file_id in self.progress:
+            self.progress[file_id]["error"] = error_message
+
+
+# Create a global instance
+simplification_progress = SimplificationProgress()
+
 class TextSimplificationAgent:
     """Agent that orchestrates the cognitive simplification process with vector DB support."""
 
@@ -54,7 +100,8 @@ class TextSimplificationAgent:
     ):
         self.model = model
         self.verbose = verbose
-        self.attachment_vector_space = AttachmentVectorSpace(user_id=user_id)
+        self.attachment_vector_space = AttachmentVectorSpace()
+        self.user_id = user_id
         self.file_id = file_id
 
         # Create or get ChromaDB collection
@@ -288,7 +335,9 @@ MISSING INFORMATION (be specific and concise):
         #     where={"original": True},  # Only retrieve from original document
         # )
         results = self.attachment_vector_space.retrieve_documents(
-            query=query, n_results=top_k, filter={"file_id": self.file_id}
+            query=query,
+            n_results=top_k,
+            filter={"user_id": self.user_id, "file_id": self.file_id},
         )
 
         # Extract the relevant chunks
@@ -371,7 +420,7 @@ UPDATED SIMPLIFIED TEXT:
         return self.call_groq_llm(prompt)
 
     def process_chunk_with_context_retrieval(
-        self, original_chunk: str, cognitive_profile: Dict[str, int], chunk_index: int
+        self, original_chunk: str, cognitive_profile: CognitiveProfile, chunk_index: int
     ) -> str:
         """
         Process a single chunk with context retrieval for lost information.
@@ -386,9 +435,11 @@ UPDATED SIMPLIFIED TEXT:
         """
         self.log(f"Processing chunk {chunk_index}")
 
+        profile_dict = cognitive_profile.model_dump()
+
         # Identify domains that need simplification (level < 5)
         domains_to_simplify = [
-            domain for domain, level in cognitive_profile.items() if level < 5
+            domain for domain, level in profile_dict.items() if level < 5
         ]
 
         # Start with the original text
@@ -396,8 +447,8 @@ UPDATED SIMPLIFIED TEXT:
 
         # Apply simplification for each domain sequentially
         for domain in domains_to_simplify:
-            level = cognitive_profile[domain]
-            self.log(f"  Simplifying for {domain} (level {level})...")
+            level = profile_dict.get(domain)
+            self.log(f"Simplifying for {domain} (level {level})...")
 
             current_text = self.simplify_text_for_cognitive_domain(
                 current_text, domain, level
@@ -409,12 +460,12 @@ UPDATED SIMPLIFIED TEXT:
         )
 
         if has_loss:
-            self.log(f"  Detected information loss: {len(missing_elements)} elements")
-            self.log(f"  Missing: {missing_elements[:3]}...")
+            self.log(f"Detected information loss: {len(missing_elements)} elements")
+            self.log(f"Missing: {missing_elements[:3]}...")
 
             # Retrieve relevant context
             context_chunks = self.retrieve_relevant_context(missing_elements)
-            self.log(f"  Retrieved {len(context_chunks)} relevant context chunks")
+            self.log(f"Retrieved {len(context_chunks)} relevant context chunks")
 
             # Reincorporate missing information
             current_text = self.reincorporate_missing_information(
@@ -427,106 +478,172 @@ UPDATED SIMPLIFIED TEXT:
 
         return current_text
 
+    #     def process_documents(
+    #         self,
+    #         documents: List[LlamaIndexDocument],
+    #         cognitive_profile: Dict[str, int],
+    #         chunk_size: int = 4000,
+    #         chunk_overlap: int = 100,
+    #         max_workers: int = 4,
+    #     ) -> str:
+    #         """
+    #         Process a document with the agentic cognitive simplification workflow.
+
+    #         Args:
+    #             document: The document to process
+    #             cognitive_profile: Dictionary with cognitive domains and levels
+    #             chunk_size: Size of each chunk in tokens for processing
+    #             chunk_overlap: Overlap between chunks in tokens
+    #             max_workers: Maximum number of concurrent workers
+
+    #         Returns:
+    #             Processed document
+    #         """
+    #         # Validate cognitive profile
+    #         profile = self.validate_cognitive_profile(cognitive_profile)
+    #         self.log(f"Using cognitive profile: {json.dumps(profile, indent=2)}")
+
+    #         # Identify domains that need simplification (level < 5)
+    #         domains_to_simplify = [domain for domain, level in profile.items() if level < 5]
+
+    #         # if not domains_to_simplify:
+    #         #     self.log("No simplification needed - all cognitive domains at level 5")
+    #         #     return document
+
+    #         self.log(f"Simplifying for domains: {', '.join(domains_to_simplify)}")
+
+    #         # # 1. Store document in vector database (using smaller chunks)
+    #         # self.store_document_in_vector_db(document, chunk_size=1000, overlap=200)
+
+    #         # 2. Split document into processing chunks
+    #         # Use a sentence splitter to create chunks
+    #         splitter = get_sentence_splitter(
+    #             chunk_size=chunk_size, chunk_overlap=chunk_overlap
+    #         )
+    #         # chunks = self.split_text_into_chunks(document, chunk_size, chunk_overlap)
+    #         chunks = splitter.get_nodes_from_documents(documents)
+    #         self.log(f"Split into {len(chunks)} processing chunks")
+
+    #         # 3. Process each chunk with context retrieval
+    #         simplified_chunks = []
+
+    #         # Use ThreadPoolExecutor for parallel processing
+    #         with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    #             # Create futures
+    #             futures = [
+    #                 executor.submit(
+    #                     self.process_chunk_with_context_retrieval,
+    #                     chunk.get_content("embed"),
+    #                     profile,
+    #                     i,
+    #                 )
+    #                 for i, chunk in enumerate(chunks)
+    #             ]
+
+    #             # Collect results in order
+    #             for future in futures:
+    #                 simplified_chunks.append(future.result())
+
+    #         # 4. Combine all simplified chunks
+    #         simplified_document = "\n\n".join(simplified_chunks)
+
+    #         # 5. Final pass to ensure consistency across the entire document
+    #         self.log("Performing final pass for consistency...")
+
+    #         consistency_prompt = f"""
+    # You are an expert in creating accessible content for people with cognitive differences.
+    # You have been given a document that has already been simplified based on a cognitive profile.
+    # However, because it was processed in chunks, there may be inconsistencies in terminology,
+    # style, or flow between sections.
+
+    # Your task is to review the document and make minor adjustments to ensure consistency
+    # throughout, while preserving the simplifications already made.
+
+    # COGNITIVE PROFILE:
+    # {json.dumps(profile, indent=2)}
+
+    # DOCUMENT TO REVIEW:
+    # {simplified_document}
+
+    # Please make only the necessary adjustments to ensure consistency while preserving
+    # the accessibility features already implemented.
+
+    # CONSISTENT DOCUMENT:
+    # """
+
+    #         # Check if the document is too long for a final pass
+    #         if self.num_tokens(simplified_document) > chunk_size * 1.5:
+    #             self.log(
+    #                 "Document too long for single final pass, skipping consistency check"
+    #             )
+    #             return simplified_document
+
+    #         final_document = self.call_groq_llm(consistency_prompt)
+
+    #         return final_document
     def process_documents(
         self,
         documents: List[LlamaIndexDocument],
-        cognitive_profile: Dict[str, int],
+        cognitive_profile: CognitiveProfile,
         chunk_size: int = 4000,
         chunk_overlap: int = 100,
         max_workers: int = 4,
     ) -> str:
         """
         Process a document with the agentic cognitive simplification workflow.
-
-        Args:
-            document: The document to process
-            cognitive_profile: Dictionary with cognitive domains and levels
-            chunk_size: Size of each chunk in tokens for processing
-            chunk_overlap: Overlap between chunks in tokens
-            max_workers: Maximum number of concurrent workers
-
-        Returns:
-            Processed document
         """
-        # Validate cognitive profile
-        profile = self.validate_cognitive_profile(cognitive_profile)
-        self.log(f"Using cognitive profile: {json.dumps(profile, indent=2)}")
+        # # Validate cognitive profile
+        # profile = self.validate_cognitive_profile(cognitive_profile)
 
-        # Identify domains that need simplification (level < 5)
-        domains_to_simplify = [domain for domain, level in profile.items() if level < 5]
-
-        # if not domains_to_simplify:
-        #     self.log("No simplification needed - all cognitive domains at level 5")
-        #     return document
-
-        self.log(f"Simplifying for domains: {', '.join(domains_to_simplify)}")
-
-        # # 1. Store document in vector database (using smaller chunks)
-        # self.store_document_in_vector_db(document, chunk_size=1000, overlap=200)
-
-        # 2. Split document into processing chunks
-        # Use a sentence splitter to create chunks
+        # Split document into processing chunks
         splitter = get_sentence_splitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
-        # chunks = self.split_text_into_chunks(document, chunk_size, chunk_overlap)
         chunks = splitter.get_nodes_from_documents(documents)
-        self.log(f"Split into {len(chunks)} processing chunks")
 
-        # 3. Process each chunk with context retrieval
+        # Initialize progress tracking
+        simplification_progress.create_task(self.file_id, len(chunks))
+
+        # Process each chunk
         simplified_chunks = []
 
-        # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Create futures
-            futures = [
-                executor.submit(
-                    self.process_chunk_with_context_retrieval,
-                    chunk.get_content("embed"),
-                    profile,
-                    i,
-                )
-                for i, chunk in enumerate(chunks)
-            ]
+        try:
+            # Use ThreadPoolExecutor for parallel processing
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Create futures
+                futures: List[Tuple[int, Future]] = []
+                for i, chunk in enumerate(chunks):
+                    future = executor.submit(
+                        self.process_chunk_with_context_retrieval,
+                        chunk.get_content("embed"),
+                        cognitive_profile,
+                        i,
+                    )
+                    futures.append((i, future))
 
-            # Collect results in order
-            for future in futures:
-                simplified_chunks.append(future.result())
+                # Collect results in order
+                for i, future in futures:
+                    try:
+                        simplified_chunk = future.result()
+                        simplified_chunks.append(simplified_chunk)
 
-        # 4. Combine all simplified chunks
-        simplified_document = "\n\n".join(simplified_chunks)
+                        # Update progress
+                        simplification_progress.update_chunk(
+                            self.file_id, i, simplified_chunk
+                        )
+                    except Exception as e:
+                        self.log(f"Error processing chunk {i}: {e}")
+                        # Update error status
+                        simplification_progress.set_error(
+                            self.file_id, f"Error processing chunk {i}: {str(e)}"
+                        )
+                        # Continue with other chunks
+                        simplified_chunks.append(chunk.get_content("embed"))
 
-        # 5. Final pass to ensure consistency across the entire document
-        self.log("Performing final pass for consistency...")
-
-        consistency_prompt = f"""
-You are an expert in creating accessible content for people with cognitive differences.
-You have been given a document that has already been simplified based on a cognitive profile.
-However, because it was processed in chunks, there may be inconsistencies in terminology, 
-style, or flow between sections.
-
-Your task is to review the document and make minor adjustments to ensure consistency 
-throughout, while preserving the simplifications already made.
-
-COGNITIVE PROFILE:
-{json.dumps(profile, indent=2)}
-
-DOCUMENT TO REVIEW:
-{simplified_document}
-
-Please make only the necessary adjustments to ensure consistency while preserving 
-the accessibility features already implemented.
-
-CONSISTENT DOCUMENT:
-"""
-
-        # Check if the document is too long for a final pass
-        if self.num_tokens(simplified_document) > chunk_size * 1.5:
-            self.log(
-                "Document too long for single final pass, skipping consistency check"
-            )
-            return simplified_document
-
-        final_document = self.call_groq_llm(consistency_prompt)
-
-        return final_document
+            # Final processing - this shouldn't be necessary for streaming
+            # but keep it for a final combined document if needed
+            combined_document = "\n\n".join(simplified_chunks)
+            return combined_document
+        except Exception as e:
+            simplification_progress.set_error(self.file_id, str(e))
+            raise e

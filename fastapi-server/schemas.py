@@ -9,7 +9,8 @@ class BaseSchema(BaseModel):
         extra="forbid",
     )
 
-class CognitiveProfile(BaseSchema):
+
+class CognitiveProfile(BaseModel):
     memory: int
     attention: int
     language: int
@@ -17,15 +18,15 @@ class CognitiveProfile(BaseSchema):
     executive: int
 
 
-class UserInDB(BaseSchema):
+class UserInDB(BaseModel):
     """
     Represents a user in the system, including their cognitive profile and preferences.
     """
     id: str = Field(description="Unique identifier for the user")
-    cognitive_profile: Optional[CognitiveProfile] = Field(
-        default=None,
+    cognitive_profile: CognitiveProfile = Field(
         description="User's cognitive profile, including memory, attention, language, visual-spatial, and executive functions"
     )
+
 
 class ChunkData(BaseSchema):
     """

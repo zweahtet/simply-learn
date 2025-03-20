@@ -104,13 +104,10 @@ class YouTubeVectorSpace(QdrantVectorSpace):
 class AttachmentVectorSpace(QdrantVectorSpace):
     DEFAULT_COLLECTION_NAME = "attachments"
 
-    def __init__(self, user_id: str):
+    def __init__(self):
         """
         Initialize the vector space for attachments.
-        Args:
-            user_id (str): User ID for the vector space.
         """
-        self.user_id = user_id
         super().__init__(collection_name=self.DEFAULT_COLLECTION_NAME)
 
     def build_collection(self):
@@ -164,7 +161,7 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                         must = [
                             models.FieldCondition(
                                 key="user_id",
-                                match=models.MatchValue(value=self.user_id),
+                                match=models.MatchValue(value=filter.get("user_id")),
                             ),
                             models.FieldCondition(
                                 key="file_id",
