@@ -74,22 +74,6 @@ export function Register({ onLoginClick, assessmentResults }: RegisterProps) {
 						</Alert>
 					)}
 
-					<div className="bg-blue-50 p-4 rounded-md mb-4">
-						<h3 className="text-sm font-medium text-blue-800 mb-2">
-							Your Learning Profile
-						</h3>
-						<div className="flex justify-between text-sm text-blue-700">
-							<span>
-								Language Level:{" "}
-								{assessmentResults.languageLevel}
-							</span>
-							<span>
-								Memory Score:{" "}
-								{assessmentResults.cognitiveProfile.memory}/10
-							</span>
-						</div>
-					</div>
-
 					<div className="space-y-2">
 						<Label htmlFor="email">Email</Label>
 						<Input
@@ -123,7 +107,7 @@ export function Register({ onLoginClick, assessmentResults }: RegisterProps) {
 						/>
 					</div>
 				</CardContent>
-				<CardFooter className="flex flex-col space-y-2">
+				<CardFooter className="flex flex-col space-y-2 mt-6">
 					<Button
 						type="submit"
 						className="w-full"

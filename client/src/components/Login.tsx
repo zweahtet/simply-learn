@@ -73,7 +73,7 @@ export function LoginForm({ onRegisterClick }: { onRegisterClick: () => void }) 
 						/>
 					</div>
 				</CardContent>
-				<CardFooter className="flex flex-col space-y-2">
+				<CardFooter className="flex flex-col space-y-2 mt-6">
 					<Button
 						type="submit"
 						className="w-full"
