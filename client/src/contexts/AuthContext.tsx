@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
-import { CognitiveProfile } from "@/types";
+import { UserProfile } from "@/types";
 
 interface AuthContextType {
 	session: Session | null;
@@ -20,48 +20,35 @@ interface AuthContextType {
 	signOut: () => Promise<void>;
 }
 
-interface UserProfile {
-	id?: string;
-	email?: string;
-	languageLevel: string;
-	cognitiveProfile: CognitiveProfile;
-	completedAssessment: boolean;
-}
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [session, setSession] = useState<Session | null>(null);
 	const [user, setUser] = useState<User | null>(null);
 	const [profile, setProfile] = useState<UserProfile | null>(null);
-	const [loading, setLoading] = useState(true);
+	const [loading, setLoading] = useState<boolean>(true);
 	const supabase = createClient();
 
 	useEffect(() => {
 		// Initial session check
 		supabase.auth.getUser().then(({ data: { user } }) => {
-			setUser(user);
-
 			if (user) {
-				fetchUserProfile(user.id);
-			} else {
-				setLoading(false);
+				setUser(user);
+				// fetchUserProfile(user.id);
 			}
+			setLoading(false);
 		});
 
 		// Listen for auth changes
 		const {
 			data: { subscription },
 		} = supabase.auth.onAuthStateChange((_event, session) => {
-			setSession(session);
-			setUser(session?.user ?? null);
-
-			if (session?.user) {
-				fetchUserProfile(session.user.id);
-			} else {
-				setProfile(null);
-				setLoading(false);
+			if (session && session.user) {
+				setSession(session);
+				setUser(session.user);
+				// fetchUserProfile(session.user.id);
 			}
+			setLoading(false);
 		});
 
 		return () => subscription.unsubscribe();
@@ -76,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				.eq("id", userId)
 				.single();
 
+			console.log("Fetched user profile:", data);
 			if (error) throw error;
 
 			setProfile(data);
@@ -114,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					{
 						id: data.user.id,
 						email,
+						language_level: userProfile.languageLevel,
 						cognitive_profile: userProfile.cognitiveProfile,
 						completed_assessment: true,
 					},
