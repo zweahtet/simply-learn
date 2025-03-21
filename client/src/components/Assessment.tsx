@@ -18,37 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Check, ChevronRight, Clock, Brain } from "lucide-react";
-
-// Define assessment sections
-interface AssessmentQuestion {
-	id: string;
-	type: "choice" | "text" | "memory" | "visuospatial" | "sequencing";
-	question: string;
-	choices?: string[];
-	correctAnswer?: string;
-	instructions?: string;
-	points: number;
-	timerSeconds?: number; // Add timer property to questions
-}
-
-interface AssessmentSection {
-	id: string;
-	title: string;
-	description: string;
-	questions: AssessmentQuestion[];
-}
-
-interface AssessmentResultsSummary {
-	languageLevel: string;
-	cognitiveProfile: {
-		memory: number;
-		attention: number;
-		language: number;
-		visualSpatial: number;
-		executive: number;
-	};
-	overallScore: number;
-}
+import { AssessmentResultsSummary, AssessmentSection } from "@/types";
 
 interface CognitiveAssessmentProps {
 	onComplete: (results: AssessmentResultsSummary) => void;
@@ -566,7 +536,7 @@ export function CognitiveAssessment({
 					(attentionScore / maxAttentionScore) * 10
 				),
 				language: Math.round((languageScore / maxLanguageScore) * 10),
-				visualSpatial: visualSpatialScore,
+				visuospatial: visualSpatialScore,
 				executive: Math.round(
 					(executiveScore / maxExecutiveScore) * 10
 				),
@@ -922,7 +892,7 @@ export function AssessmentResults({
 							</div>
 							<div>
 								<div className="flex justify-between mb-1 text-sm">
-									<span>Executive Function</span>
+									<span>Reasoning Function</span>
 									<span>
 										{results.cognitiveProfile.executive}/10
 									</span>
