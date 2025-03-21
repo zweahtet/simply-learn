@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-export function Login({ onRegisterClick }: { onRegisterClick: () => void }) {
+export function LoginForm({ onRegisterClick }: { onRegisterClick: () => void }) {
 	const { signIn } = useAuth();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
