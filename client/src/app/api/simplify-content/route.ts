@@ -2,19 +2,13 @@
 import { NextResponse } from 'next/server';
 import { Groq } from 'groq-sdk';
 import { ModelCards } from '@/lib/defaults';
+import { CognitiveProfile } from '@/types';
 
 // Initialize clients
 const groqClient = new Groq({
     apiKey: process.env.GROQ_API_KEY
 });
 
-interface CognitiveProfile {
-    memory: number;
-    attention: number;
-    language: number;
-    visualSpatial: number;
-    executive: number;
-}
 
 export async function POST(request: Request) {
     try {
@@ -64,7 +58,7 @@ function generateSystemPrompt(level: string, cognitiveProfile?: CognitiveProfile
         memory: 5,
         attention: 5,
         language: 5,
-        visualSpatial: 5,
+        visuospatial: 5,
         executive: 5
     };
 
