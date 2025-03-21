@@ -7,10 +7,10 @@ export interface FileMetadata {
     isComplete?: boolean;
 }
 
-export interface CognitiveLevel {
+export interface CognitiveProfile {
     attention: number;
     memory: number;
     language: number;
     visuospatial: number;
-    reasoning: number;
+    executive: number;
 }
