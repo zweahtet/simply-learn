@@ -38,7 +38,7 @@ export default function RootLayout({
 				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
 			>
 				<AuthProvider>
-					<FpjsProvider
+					{/* <FpjsProvider
 						loadOptions={{
 							apiKey: fpjsPublicApiKey,
 							endpoint: FingerprintJSPro.defaultEndpoint,
@@ -47,7 +47,8 @@ export default function RootLayout({
 						}}
 					>
 						{children}
-					</FpjsProvider>
+					</FpjsProvider> */}
+					{children}
 				</AuthProvider>
 			</body>
 		</html>
