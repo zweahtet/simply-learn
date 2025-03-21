@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
-import { CognitiveLevel } from "@/types";
+import { CognitiveProfile } from "@/types";
 
 interface AuthContextType {
 	session: Session | null;
@@ -23,7 +23,8 @@ interface AuthContextType {
 interface UserProfile {
 	id?: string;
 	email?: string;
-	cognitiveLevel: CognitiveLevel;
+	languageLevel: string;
+	cognitiveProfile: CognitiveProfile;
 	completedAssessment: boolean;
 }
 
@@ -33,17 +34,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [session, setSession] = useState<Session | null>(null);
 	const [user, setUser] = useState<User | null>(null);
 	const [profile, setProfile] = useState<UserProfile | null>(null);
-    const [loading, setLoading] = useState(true);
-    const supabase = createClient();
+	const [loading, setLoading] = useState(true);
+	const supabase = createClient();
 
-    useEffect(() => {
+	useEffect(() => {
 		// Initial session check
 		supabase.auth.getUser().then(({ data: { user } }) => {
-            setUser(user);
-            
-            if (user) {
-                fetchUserProfile(user.id);
-            } else {
+			setUser(user);
+
+			if (user) {
+				fetchUserProfile(user.id);
+			} else {
 				setLoading(false);
 			}
 		});
@@ -113,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					{
 						id: data.user.id,
 						email,
-						cognitive_level: userProfile.cognitiveLevel,
+						cognitive_profile: userProfile.cognitiveProfile,
 						completed_assessment: true,
 					},
 				]);
