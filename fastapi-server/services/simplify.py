@@ -40,7 +40,7 @@ qdrant_client.set_model(
 DEFAULT_MODEL = GroqModels.LLAMA_3_70B_VERSATILE.value  # 32,768 max completion tokens
 
 # Cognitive domains in the 5-cog approach
-COGNITIVE_DOMAINS = ["attention", "memory", "visuospatial", "language", "reasoning"]
+COGNITIVE_DOMAINS = ["attention", "memory", "visuospatial", "language", "executive"]
 
 
 class SimplificationProgress:
@@ -236,7 +236,7 @@ class TextSimplificationAgent:
                 4: "The person has mild language difficulties. Use clear, straightforward language. Limit complex sentence structures. Briefly explain specialized terminology.",
                 5: "The person has typical language abilities. Maintain original language but ensure clarity and precision.",
             },
-            "reasoning": {
+            "executive": {
                 1: "The person has severe reasoning challenges. Break down complex ideas into explicit, simple steps. Use concrete examples for every abstract concept. Avoid all logical leaps. Explicitly state causes and effects. Avoid conditional statements when possible; when necessary, present them as step-by-step scenarios.",
                 2: "The person struggles with reasoning tasks. Provide step-by-step explanations for complex ideas. Include examples for abstract concepts. Make logical connections explicit. Clarify cause and effect relationships.",
                 3: "The person has moderate reasoning challenges. Break down multi-step processes. Support abstract ideas with examples. Make key logical connections explicit. Clarify complex relationships.",
