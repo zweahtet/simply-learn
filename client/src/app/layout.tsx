@@ -7,6 +7,7 @@ import {
 	FingerprintJSPro,
 } from "@fingerprintjs/fingerprintjs-pro-react";
 import "./globals.css";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 // https://github.com/fingerprintjs/fingerprintjs-pro-react/blob/main/examples/next-appDir/app/HomePage.tsx
 const fpjsPublicApiKey = process.env.NEXT_PUBLIC_FPJS_PUBLIC_API_KEY as string;
@@ -36,16 +37,18 @@ export default function RootLayout({
 			<body
 				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
 			>
-				<FpjsProvider
-					loadOptions={{
-						apiKey: fpjsPublicApiKey,
-						endpoint: FingerprintJSPro.defaultEndpoint,
-						scriptUrlPattern:
-							FingerprintJSPro.defaultScriptUrlPattern,
-					}}
-				>
-					{children}
-				</FpjsProvider>
+				<AuthProvider>
+					<FpjsProvider
+						loadOptions={{
+							apiKey: fpjsPublicApiKey,
+							endpoint: FingerprintJSPro.defaultEndpoint,
+							scriptUrlPattern:
+								FingerprintJSPro.defaultScriptUrlPattern,
+						}}
+					>
+						{children}
+					</FpjsProvider>
+				</AuthProvider>
 			</body>
 		</html>
 	);
