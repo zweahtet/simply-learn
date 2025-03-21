@@ -15,7 +15,7 @@ class CognitiveProfile(BaseModel):
     attention: int
     language: int
     visuospatial: int
-    reasoning: int
+    executive: int
 
 
 class UserInDB(BaseModel):
@@ -24,7 +24,7 @@ class UserInDB(BaseModel):
     """
     id: str = Field(description="Unique identifier for the user")
     cognitive_profile: CognitiveProfile = Field(
-        description="User's cognitive profile, including memory, attention, language, visual-spatial, and reasoning functions"
+        description="User's cognitive profile, including memory, attention, language, visual-spatial, and executive functions"
     )
 
 
