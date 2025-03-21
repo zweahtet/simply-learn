@@ -29,11 +29,11 @@ import {
 	FormLabel,
 	FormMessage,
 } from "@/components/ui/form";
+import { FileMetadata } from "@/types";
 
 // Constants for validation
 const MAX_WORD_COUNT = 5000;
-const MAX_FILE_SIZE_MB = 25;
-const MAX_FILE_COUNT = 3;
+const MAX_FILE_SIZE_MB = 10; // 10MB
 const MB_IN_BYTES = 1048576; // 1MB in bytes
 const ALLOWED_FILE_TYPES = ["text/plain", "application/pdf"];
 
@@ -122,15 +122,6 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 		const newFilesToAdd: File[] = [];
 		const existingFileNames = new Set(allFiles.map((file) => file.name));
 
-		// Check if adding these files would exceed the max file count
-		if (allFiles.length + files.length > MAX_FILE_COUNT) {
-			setFileError(`Maximum of ${MAX_FILE_COUNT} files allowed`);
-			if (fileInputRef.current) {
-				fileInputRef.current.value = "";
-			}
-			return;
-		}
-
 		// Check total size of all files (existing + new)
 		let totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
 
@@ -210,10 +201,23 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 				const data = await response.json();
 
 				if (data.success) {
-					// Use the extracted content from the files
-					onUpload(data.content);
+					if (data.files && Array.isArray(data.files)) {
+						const fileMetadata: FileMetadata[] = data.files.map((file: any) => ({
+							fileId: file.fileId,
+							filename: file.filename,
+							title: file.title || file.filename,
+							totalPages: file.totalPages,
+						}))
+
+						if (fileMetadata.length > 0) {
+							onUpload(fileMetadata[0].fileId);
+						}
+					} else if (data.content) {
+						// Fallback for older API that just returns content
+						onUpload(data.content);
+					}
 				} else {
-					setError(data.error || "Error processing files");
+					setError(data.error || "No file metadata or content returned");
 				}
 			} else {
 				// Process text content
@@ -439,9 +443,7 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 												Click to upload or drag and drop
 											</p>
 											<p className="text-xs text-gray-500 mb-4">
-												PDF & TXT files (max{" "}
-												{MAX_FILE_SIZE_MB}MB,{" "}
-												{MAX_FILE_COUNT} files)
+												PDF & TXT files (max{" "}{MAX_FILE_SIZE_MB}MB)
 											</p>
 											<Input
 												id="file-upload"
@@ -451,7 +453,7 @@ export function ContentUploader({ onUpload }: ContentUploaderProps) {
 												hidden
 												aria-hidden="true"
 												onChange={handleFileUpload}
-												multiple={MAX_FILE_COUNT > 1}
+												multiple
 											/>
 										</label>
 									</div>
