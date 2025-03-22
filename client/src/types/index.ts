@@ -1,10 +1,11 @@
 // client/src/types/index.ts
 export interface FileMetadata {
-    fileId: string;
-    filename: string;
-    title: string;
+    id: string;
+    name: string;
+    type: "pdf" | "text";
+    size: number;
     totalPages: number;
-    isComplete?: boolean;
+    status: "processing" | "ready" | "error";
 }
 
 export interface CognitiveProfile {
