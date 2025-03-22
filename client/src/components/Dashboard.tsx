@@ -8,7 +8,7 @@ import { ContentDisplay } from "@/components/ContentDisplay";
 import { ExerciseGenerator } from "@/components/ExerciseGenerator";
 import { FileList } from "@/components/file-list";
 import { FileMetadata } from "@/types";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
 import { BookOpen, PenTool, Video } from "lucide-react";
 import { SimplifiedTab } from "@/components/simplified-tab";
