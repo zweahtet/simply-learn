@@ -1,41 +1,37 @@
+// simply-learn/client/src/components/file-list.tsx
 "use client";
 import React from "react";
+import { cn } from "@/lib/utils";
 import {
-	Sidebar,
-	SidebarContent,
-	SidebarGroup,
-	SidebarHeader,
-	SidebarMenu,
-	SidebarMenuButton,
-	SidebarMenuItem,
-	SidebarMenuSub,
-	SidebarMenuSubButton,
-    SidebarMenuSubItem,
-    SidebarFooter
-} from "@/components/ui/sidebar";
+	Card,
+	CardContent,
+	CardFooter,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileMetadata } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Upload } from "lucide-react";
-
-
-
+import { Upload, FileText, FileIcon } from "lucide-react";
 
 interface SidebarProps {
+	files: FileMetadata[];
+	setFiles: React.Dispatch<React.SetStateAction<FileMetadata[]>>;
 	selectedFile: FileMetadata | null;
 	onFileSelect: (file: FileMetadata | null) => void;
 }
 
 export function FileList({
-    onFileSelect,
-    selectedFile,
-    ...props
+	files,
+	setFiles,
+	onFileSelect,
+	selectedFile,
 }: SidebarProps) {
-	const [files, setFiles] = React.useState<FileMetadata[]>([]); // TODO: Fetch files from the server with swr
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
+	const fileInputRef = React.useRef<HTMLInputElement>(null);
 	const [isUploading, setIsUploading] = React.useState(false);
 	const [uploadProgress, setUploadProgress] = React.useState(0);
 	const isMobile = useIsMobile();
@@ -47,9 +43,9 @@ export function FileList({
 		}
 
 		// TODO: invoke the file delete API here
-	}
-    
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+	};
+
+	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const selectedFiles = e.target.files;
 		if (!selectedFiles || selectedFiles.length === 0) return;
 
@@ -60,7 +56,7 @@ export function FileList({
 		}
 
 		if (totalSize > 10 * 1024 * 1024) {
-            toast.error("Files exceed the maximum size limit of 10MB");
+			toast.error("Files exceed the maximum size limit of 10MB");
 			return;
 		}
 
@@ -77,11 +73,25 @@ export function FileList({
 				id: `${uuidv4()}`,
 				name: file.name,
 				type: fileType,
-                size: file.size,
-                totalPages: 0,
+				size: file.size,
+				totalPages: 0,
 				status: "processing",
 			});
 		});
+
+		// Check if files already exist
+		const existingFiles = files.filter((file) =>
+			newFiles.some((newFile) => newFile.name === file.name)
+		);
+
+		if (existingFiles.length > 0) {
+			toast.error("Some files already exist");
+			setIsUploading(false);
+			return;
+		}
+
+		// Add new files to the list
+		setFiles((prevFiles) => [...prevFiles, ...newFiles]);
 
 		// Simulate upload progress
 		const interval = setInterval(() => {
@@ -136,76 +146,107 @@ export function FileList({
 		);
 	};
 
+	const totalSize = files.reduce((total, file) => total + file.size, 0);
+	const totalSizeFormatted = formatFileSize(totalSize);
+	const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
+
 	return (
-		<Sidebar variant="floating" {...props}>
-			<SidebarHeader>
-				<h2 className="text-lg font-semibold">Files</h2>
-			</SidebarHeader>
-			<SidebarContent>
-				<SidebarGroup>
-					<div className="flex flex-col gap-4 p-4">
-						<input
-							type="file"
-							ref={fileInputRef}
-							onChange={handleFileChange}
-							className="hidden"
-							multiple
-							accept=".pdf,.txt,.doc,.docx"
-							aria-label="Upload files"
-						/>
+		<Card className="h-full shadow-sm">
+			<CardHeader className="items-start">
+				<CardTitle>Files</CardTitle>
+			</CardHeader>
+			<CardContent className="flex min-h-0 flex-1 flex-col gap-2">
+				<div className="flex-shrink-0">
+					<input
+						type="file"
+						ref={fileInputRef}
+						onChange={handleFileChange}
+						className="hidden"
+						multiple
+						accept=".pdf,.txt,.doc,.docx"
+						aria-label="Upload files"
+					/>
 
-						<Button
-							onClick={() => fileInputRef.current?.click()}
-							disabled={isUploading}
-							className="w-full"
-						>
-							<Upload className="mr-2 h-4 w-4" />
-							Upload Files
-						</Button>
-
-						{isUploading && (
-							<div className="space-y-2">
-								<div className="flex items-center justify-between">
-									<span className="text-sm text-muted-foreground">
-										Uploading...
-									</span>
-									<span className="text-sm font-medium">
-										{uploadProgress}%
-									</span>
-								</div>
-								<Progress
-									value={uploadProgress}
-									className="h-2"
-								/>
-							</div>
+					<Button
+						onClick={() => fileInputRef.current?.click()}
+						disabled={isUploading}
+						className="w-full"
+					>
+						<Upload className="mr-2 h-4 w-4" />
+						Add File
+					</Button>
+				</div>
+				<ScrollArea className="">
+					<div className="space-x-4 p-4">
+					{files.length === 0 ? (
+						<div className="p-4 text-center text-muted-foreground text-sm w-full">
+							No files uploaded yet
+						</div>
+					) : (
+						<ul className="">
+							{files.map((file) => (
+								<li
+									key={file.id}
+									className={cn(
+										"flex items-center justify-between p-2 hover:bg-muted rounded-md cursor-pointer",
+										selectedFile?.id === file.id &&
+											"bg-muted"
+									)}
+									onClick={() => {
+										if (file.status === "ready") {
+											onFileSelect(file);
+										}
+									}}
+								>
+									<div className="">
+										<div className="flex-shrink-0">
+											{file.type === "pdf" ? (
+												<FileText className="h-8 w-8 text-red-500" />
+											) : (
+												<FileIcon className="h-8 w-8 text-blue-500" />
+											)}
+										</div>
+										<div className="">
+											<p
+												className="text-sm font-medium"
+												title={file.name}
+											>
+												{file.name}
+											</p>
+											<p className="text-xs text-muted-foreground">
+												{formatFileSize(file.size)}
+											</p>
+										</div>
+										{file.status === "processing" && (
+											<div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-t-transparent border-primary animate-spin" />
+										)}
+										<Button
+											variant="destructive"
+											size="icon"
+											className="flex-shrink-0 ml-2"
+											onClick={(e) => {
+												e.stopPropagation();
+												handleFileDelete(file.id);
+											}}
+										>
+											Delete
+										</Button>
+									</div>
+								</li>
+							))}
+						</ul>
 						)}
 					</div>
-					<SidebarMenu className="gap-2">
-						{files.map((file) => (
-							<SidebarMenuItem key={file.id}></SidebarMenuItem>
-						))}
-					</SidebarMenu>
-				</SidebarGroup>
-			</SidebarContent>
-			<SidebarFooter>
-				<div className="flex items-center justify-between">
-					<span className="text-sm font-medium">Total Size:</span>
+				</ScrollArea>
+			</CardContent>
+			<CardFooter className="border-t flex-col">
+				<div className="w-full mt-4 mb-0">
+					<Progress value={percentUsed} className="h-1.5" />
 					<span className="text-sm">
-						{formatFileSize(
-							files.reduce((total, file) => total + file.size, 0)
-						)}{" "}
-						/ 10 MB
+						{percentUsed.toFixed(2)}% storage capacity used
 					</span>
 				</div>
-				<Progress
-					value={
-						(files.reduce((total, file) => total + file.size, 0) /
-							(10 * 1024 * 1024)) *
-						100
-					}
-					className="h-1.5 mt-2"
-				/>
-			</SidebarFooter>
-		</Sidebar>
+			</CardFooter>
+		</Card>
 	);
 }
