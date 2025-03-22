@@ -7,7 +7,10 @@ import {
 	FingerprintJSPro,
 } from "@fingerprintjs/fingerprintjs-pro-react";
 import "./globals.css";
+import { Toaster } from "sonner";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/components/theme-provider";
+
 
 // https://github.com/fingerprintjs/fingerprintjs-pro-react/blob/main/examples/next-appDir/app/HomePage.tsx
 const fpjsPublicApiKey = process.env.NEXT_PUBLIC_FPJS_PUBLIC_API_KEY as string;
@@ -48,7 +51,15 @@ export default function RootLayout({
 					>
 						{children}
 					</FpjsProvider> */}
-					{children}
+					<Toaster position="top-center" />
+					<ThemeProvider
+						attribute="class"
+						defaultTheme="system"
+						enableSystem
+						disableTransitionOnChange
+					>
+						{children}
+					</ThemeProvider>
 				</AuthProvider>
 			</body>
 		</html>
