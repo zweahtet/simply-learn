@@ -1,4 +1,4 @@
-// simply-learn/client/src/components/Dashboard.tsx
+// simply-learn/client/src/components/dashboard.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,202 +6,112 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContentUploader } from "@/components/ContentUploader";
 import { ContentDisplay } from "@/components/ContentDisplay";
 import { ExerciseGenerator } from "@/components/ExerciseGenerator";
+import { FileList } from "@/components/file-list";
 import { FileMetadata } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { UploadCloud, BookOpen, PenTool, LogOut } from "lucide-react";
+import { BookOpen, PenTool, Video } from "lucide-react";
+import { SimplifiedTab } from "@/components/simplified-tab";
+import { SummaryTab } from "@/components/summary-tab";
+import { VideosTab } from "@/components/videos-tap";
+
+// State for files
+// const [files, setFiles] = useState<FileMetadata[]>([]);
+// const [selectedFile, setSelectedFile] = useState<FileMetadata | null>(null);
+
+// // Handle file upload completion
+// const handleFileUpload = (newFiles: FileMetadata[]) => {
+// 	setFiles((prevFiles) => {
+// 		// Add only files that don't already exist in the array
+// 		const uniqueNewFiles = newFiles.filter(
+// 			(newFile) =>
+// 				!prevFiles.some((prevFile) => prevFile.name === newFile.name)
+// 		);
+// 		return [...prevFiles, ...uniqueNewFiles];
+// 	});
+
+// 	// Set the first uploaded file as active if no file is currently active
+// 	if (!selectedFile && newFiles.length > 0) {
+// 		setSelectedFile(newFiles[0]);
+// 	}
+// };
+
+// const handleFileDelete = (fileId: string) => {
+// 	setFiles((prevFiles) => prevFiles.filter((file) => file.id !== fileId));
+// 	if (selectedFile?.id === fileId) {
+// 		setSelectedFile(null);
+// 	}
+
+// 	// TODO: invoke the file delete API here
+// }
+
+// return (
+// 	<div className="flex h-screen overflow-hidden">
+// 		{/* Left sidebar */}
+// 		<FileListSidebar
+// 			files={files}
+// 			setFiles={setFiles}
+// 			selectedFile={selectedFile}
+// 			onFileSelect={setSelectedFile}
+// 			onFileUpload={handleFileUpload}
+// 			onFileDelete={handleFileDelete}
+// 		/>
+// 	</div>
+// );
 
 export function Dashboard() {
-	const { profile, signOut } = useAuth();
-	const [activeTab, setActiveTab] = useState("upload");
-	const [originalContent, setOriginalContent] = useState("");
-	const [adaptedContent, setAdaptedContent] = useState("");
-	const [exercises, setExercises] = useState("");
-	const [processedFiles, setProcessedFiles] = useState<FileMetadata[]>([]);
-	const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-	const [isLoading, setIsLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	// Check if we can enable the Content tab (needs content)
-	const isContentTabEnabled =
-		originalContent !== "" || processedFiles.length > 0;
-
-	// Check if we can enable the Exercises tab (needs content to have been processed)
-	const isExercisesTabEnabled = adaptedContent !== "";
-
-	// Handle file uploads and processing results
-	const handleContentUpload = async (
-		uploadedContent?: string,
-		fileMetadata?: FileMetadata
-	) => {
-		setError(null);
-
-		if (fileMetadata) {
-			// Add new file to processed files
-			setProcessedFiles((prev) => [
-				...prev,
-				{
-					...fileMetadata,
-					isComplete: false,
-				},
-			]);
-
-			// Select the new file
-			setSelectedFileId(fileMetadata.fileId);
-
-			// Switch to content tab
-			setActiveTab("content");
-		} else if (uploadedContent) {
-			// Direct content input without file processing
-			setOriginalContent(uploadedContent);
-
-			// Process the content for adaptation
-			try {
-				setIsLoading(true);
-				const response = await fetch("/api/simplify-content", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-					},
-					body: JSON.stringify({
-						content: uploadedContent,
-						cognitiveProfile: profile?.cognitiveProfile,
-					}),
-				});
-
-				const data = await response.json();
-
-				if (data.success) {
-					setAdaptedContent(data.adaptedContent);
-					setActiveTab("content");
-				} else {
-					setError(data.error || "Error adapting content");
-				}
-			} catch (error) {
-				console.error("Error:", error);
-				setError("Error connecting to server");
-			} finally {
-				setIsLoading(false);
-			}
-		}
-	};
-
-	// Handle file selection change
-	const handleFileChange = (fileId: string) => {
-		setSelectedFileId(fileId);
-	};
-
-	// Update file status when processing completes
-	const handleProcessingComplete = (fileId: string, finalContent: string) => {
-		// Update the status of the file
-		setProcessedFiles((prev) =>
-			prev.map((file) =>
-				file.fileId === fileId ? { ...file, isComplete: true } : file
-			)
-		);
-
-		// Update content if this is the currently selected file
-		if (fileId === selectedFileId) {
-			setAdaptedContent(finalContent);
-		}
-	};
-
-	// Handle generating exercises
-	const handleGenerateExercises = async () => {
-		setError(null);
-		setIsLoading(true);
-
-		try {
-			const response = await fetch("/api/generate-exercises", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					content: originalContent,
-					cognitiveProfile: profile?.cognitiveProfile,
-				}),
-			});
-
-			const data = await response.json();
-
-			if (data.success) {
-				setExercises(data.exercises);
-				setActiveTab("exercises");
-			} else {
-				setError(data.error || "Error generating exercises");
-			}
-		} catch (error) {
-			console.error("Error:", error);
-			setError("Error connecting to server");
-		} finally {
-			setIsLoading(false);
-		}
-	};
+	const [activeTab, setActiveTab] = useState("summary");
+	const [selectedFile, setSelectedFile] = useState<FileMetadata | null>(null);
 
 	return (
-		<div className="container mx-auto py-8 px-4">
-			<div className="flex justify-between items-center mb-8">
-				<div>
-					<h1 className="text-3xl font-bold">EquiLearn Dashboard</h1>
-				</div>
-				<Button variant="outline" onClick={signOut}>
-					<LogOut className="h-4 w-4 mr-2" />
-					Sign Out
-				</Button>
-			</div>
-
+		<div className="flex flex-col md:flex-row gap-6 max-w-[1800px]">
+			<FileList
+				onFileSelect={setSelectedFile}
+				selectedFile={selectedFile}
+			/>
 			<Tabs
+				defaultValue="summary"
 				value={activeTab}
 				onValueChange={setActiveTab}
 				className="w-full"
 			>
 				<TabsList className="grid w-full grid-cols-3 mb-8">
 					<TabsTrigger value="upload" className="flex items-center">
-						<UploadCloud className="h-4 w-4 mr-2" />
-						Upload Content
+						Summary
 					</TabsTrigger>
-					<TabsTrigger
-						value="content"
-						disabled={!isContentTabEnabled}
-						className="flex items-center"
-					>
+					<TabsTrigger value="content" className="flex items-center">
 						<BookOpen className="h-4 w-4 mr-2" />
-						Adapted Content
+						Simplified
 					</TabsTrigger>
 					<TabsTrigger
-						value="exercises"
-						disabled={!isExercisesTabEnabled}
+						value="study-guides"
 						className="flex items-center"
 					>
 						<PenTool className="h-4 w-4 mr-2" />
-						Practice Exercises
+						Study Plan
 					</TabsTrigger>
 				</TabsList>
 
-				<TabsContent value="upload" className="mt-4">
-					<ContentUploader onUpload={handleContentUpload} />
+				<TabsContent value="summary" className="h-full">
+					<SummaryTab fileId={selectedFile?.id} />
 				</TabsContent>
 
-				<TabsContent value="content" className="mt-4">
-					<ContentDisplay
-                        content={adaptedContent}
-                        level={profile?.languageLevel || "B1"}
-						originalContent={originalContent}
-						onGenerateExercises={handleGenerateExercises}
-						files={processedFiles}
-						onFileChange={handleFileChange}
-					/>
+				<TabsContent value="simplified" className="h-full">
+					<SimplifiedTab fileId={selectedFile?.id} />
 				</TabsContent>
 
-				<TabsContent value="exercises" className="mt-4">
+				<TabsContent value="videos" className="h-full">
+					<VideosTab fileId={selectedFile?.id} />
+				</TabsContent>
+
+				{/* <TabsContent value="study-guides" className="h-full">
 					<ExerciseGenerator
 						exercises={exercises}
 						level={profile?.languageLevel || "B1"}
 						onBack={() => setActiveTab("content")}
 						onRestart={() => setActiveTab("upload")}
 					/>
-				</TabsContent>
+				</TabsContent> */}
 			</Tabs>
 		</div>
 	);
