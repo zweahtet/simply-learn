@@ -1,6 +1,6 @@
 // simply-learn/client/src/app/(public)/page.tsx
 import { Metadata } from 'next';
-import { Welcome } from '@/components/Welcome';
+import { Welcome } from '@/components/welcome';
 
 export const metadata: Metadata = {
 	title: "EquiLearn - Personalized Learning for ESL Students",

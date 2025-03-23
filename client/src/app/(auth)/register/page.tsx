@@ -2,7 +2,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Register } from "@/components/Register";
+import { Register } from "@/components/auth/register";
 import { CognitiveProfile } from "@/types";
 
 export default function RegisterPage() {
