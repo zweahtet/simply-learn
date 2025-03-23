@@ -8,7 +8,7 @@ import {
 } from "@fingerprintjs/fingerprintjs-pro-react";
 import "./globals.css";
 import { Toaster } from "sonner";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider } from "@/contexts/auth-context";
 import { ThemeProvider } from "@/components/theme-provider";
 
 
@@ -52,14 +52,15 @@ export default function RootLayout({
 						{children}
 					</FpjsProvider> */}
 					<Toaster position="top-center" />
-					<ThemeProvider
+					{/* <ThemeProvider
 						attribute="class"
 						defaultTheme="system"
 						enableSystem
 						disableTransitionOnChange
 					>
 						{children}
-					</ThemeProvider>
+					</ThemeProvider> */}
+					{children}
 				</AuthProvider>
 			</body>
 		</html>

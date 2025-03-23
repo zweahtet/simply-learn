@@ -11,18 +11,14 @@ export function Dashboard() {
 	const [selectedFile, setSelectedFile] = useState<FileMetadata | null>(null);
 
 	return (
-		<div className="grid grid-cols-3 gap-4 m-4">
-			<div className="col-span-1">
-				<FileList
-					files={files}
-					setFiles={setFiles}
-					onFileSelect={setSelectedFile}
-					selectedFile={selectedFile}
-				/>
-			</div>
-			<div className="col-span-2">
-				<MainContent selectedFile={selectedFile} />
-			</div>
+		<div className="flex min-h-screen">
+			<FileList
+				files={files}
+				setFiles={setFiles}
+				onFileSelect={setSelectedFile}
+				selectedFile={selectedFile}
+			/>
+			<MainContent selectedFile={selectedFile} />
 		</div>
 	);
 }

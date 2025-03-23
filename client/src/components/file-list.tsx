@@ -16,7 +16,7 @@ import { FileMetadata } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Upload, FileText, FileIcon } from "lucide-react";
+import { PlusCircle, FileText, FileIcon } from "lucide-react";
 
 interface SidebarProps {
 	files: FileMetadata[];
@@ -151,102 +151,103 @@ export function FileList({
 	const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
 
 	return (
-		<Card className="h-full shadow-sm">
-			<CardHeader className="items-start">
-				<CardTitle>Files</CardTitle>
-			</CardHeader>
-			<CardContent className="flex min-h-0 flex-1 flex-col gap-2">
-				<div className="flex-shrink-0">
-					<input
-						type="file"
-						ref={fileInputRef}
-						onChange={handleFileChange}
-						className="hidden"
-						multiple
-						accept=".pdf,.txt,.doc,.docx"
-						aria-label="Upload files"
-					/>
+		<div className="relative w-full max-w-xs">
+			<Card className="w-full max-w-md rounded-none shadow-none border-t-0 border-l-0 border-b-0">
+				<CardHeader className="flex flex-row items-start justify-between">
+					<CardTitle>Files</CardTitle>
+					<div>
+						<input
+							type="file"
+							ref={fileInputRef}
+							onChange={handleFileChange}
+							className="hidden"
+							multiple
+							accept=".pdf,.txt,.doc,.docx"
+							aria-label="Upload files"
+						/>
 
-					<Button
-						onClick={() => fileInputRef.current?.click()}
-						disabled={isUploading}
-						className="w-full"
-					>
-						<Upload className="mr-2 h-4 w-4" />
-						Add File
-					</Button>
-				</div>
-				<ScrollArea className="">
-					<div className="space-x-4 p-4">
-					{files.length === 0 ? (
-						<div className="p-4 text-center text-muted-foreground text-sm w-full">
-							No files uploaded yet
-						</div>
-					) : (
-						<ul className="">
-							{files.map((file) => (
-								<li
-									key={file.id}
-									className={cn(
-										"flex items-center justify-between p-2 hover:bg-muted rounded-md cursor-pointer",
-										selectedFile?.id === file.id &&
-											"bg-muted"
-									)}
-									onClick={() => {
-										if (file.status === "ready") {
-											onFileSelect(file);
-										}
-									}}
-								>
-									<div className="">
-										<div className="flex-shrink-0">
-											{file.type === "pdf" ? (
-												<FileText className="h-8 w-8 text-red-500" />
-											) : (
-												<FileIcon className="h-8 w-8 text-blue-500" />
+						<Button
+							onClick={() => fileInputRef.current?.click()}
+							disabled={isUploading}
+							className="w-full"
+							size="sm"
+						>
+							<PlusCircle className="mr-2 h-4 w-4" />
+							Add File
+						</Button>
+					</div>
+				</CardHeader>
+				<CardContent className="flex-1 p-0">
+					<ScrollArea className="h-[calc(100vh-10rem)]">
+						<div className="p-4">
+							<div className="grid gap-4">
+								{files.length === 0 ? (
+									<div className="p-4 text-center text-muted-foreground text-sm w-full">
+										No files uploaded yet
+									</div>
+								) : (
+									files.map((item) => (
+										<div
+											key={item.id}
+											className={cn(
+												"rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md",
+												selectedFile?.id === item.id &&
+													"bg-muted"
 											)}
-										</div>
-										<div className="">
-											<p
-												className="text-sm font-medium"
-												title={file.name}
-											>
-												{file.name}
-											</p>
-											<p className="text-xs text-muted-foreground">
-												{formatFileSize(file.size)}
-											</p>
-										</div>
-										{file.status === "processing" && (
-											<div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-t-transparent border-primary animate-spin" />
-										)}
-										<Button
-											variant="destructive"
-											size="icon"
-											className="flex-shrink-0 ml-2"
-											onClick={(e) => {
-												e.stopPropagation();
-												handleFileDelete(file.id);
+											onClick={() => {
+												if (item.status === "ready") {
+													onFileSelect(item);
+												}
 											}}
 										>
-											Delete
-										</Button>
-									</div>
-								</li>
-							))}
-						</ul>
-						)}
+											<div className="flex items-start justify-between">
+												<div>
+													<h3 className="font-semibold">
+														{item.name}
+													</h3>
+													<p className="text-sm text-muted-foreground">
+														{formatFileSize(
+															item.size
+														)}
+													</p>
+												</div>
+												{item.status ===
+													"processing" && (
+													<div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-t-transparent border-primary animate-spin" />
+												)}
+												<Button
+													variant="destructive"
+													size="icon"
+													className="flex-shrink-0 ml-2"
+													onClick={(e) => {
+														e.stopPropagation();
+														handleFileDelete(
+															item.id
+														);
+													}}
+												>
+													Delete
+												</Button>
+											</div>
+										</div>
+									))
+								)}
+							</div>
+						</div>
+					</ScrollArea>
+				</CardContent>
+				<CardFooter className="flex-col">
+					<div>
+						<Progress
+							value={percentUsed}
+							className="h-1.5 w-full"
+						/>
+						<span className="text-sm">
+							{percentUsed.toFixed(2)}% storage capacity used
+						</span>
 					</div>
-				</ScrollArea>
-			</CardContent>
-			<CardFooter className="border-t flex-col">
-				<div className="w-full mt-4 mb-0">
-					<Progress value={percentUsed} className="h-1.5" />
-					<span className="text-sm">
-						{percentUsed.toFixed(2)}% storage capacity used
-					</span>
-				</div>
-			</CardFooter>
-		</Card>
+				</CardFooter>
+			</Card>
+		</div>
 	);
 }
