@@ -310,6 +310,7 @@ MISSING INFORMATION (be specific and concise):
         ]
         return True, missing_elements
 
+    # FIXME: this is not working properfly, seem not retrieving contexts
     def retrieve_relevant_context(
         self,
         missing_elements: List[str],
@@ -479,109 +480,6 @@ UPDATED SIMPLIFIED TEXT:
 
         return current_text
 
-    #     def process_documents(
-    #         self,
-    #         documents: List[LlamaIndexDocument],
-    #         cognitive_profile: Dict[str, int],
-    #         chunk_size: int = 4000,
-    #         chunk_overlap: int = 100,
-    #         max_workers: int = 4,
-    #     ) -> str:
-    #         """
-    #         Process a document with the agentic cognitive simplification workflow.
-
-    #         Args:
-    #             document: The document to process
-    #             cognitive_profile: Dictionary with cognitive domains and levels
-    #             chunk_size: Size of each chunk in tokens for processing
-    #             chunk_overlap: Overlap between chunks in tokens
-    #             max_workers: Maximum number of concurrent workers
-
-    #         Returns:
-    #             Processed document
-    #         """
-    #         # Validate cognitive profile
-    #         profile = self.validate_cognitive_profile(cognitive_profile)
-    #         self.log(f"Using cognitive profile: {json.dumps(profile, indent=2)}")
-
-    #         # Identify domains that need simplification (level < 5)
-    #         domains_to_simplify = [domain for domain, level in profile.items() if level < 5]
-
-    #         # if not domains_to_simplify:
-    #         #     self.log("No simplification needed - all cognitive domains at level 5")
-    #         #     return document
-
-    #         self.log(f"Simplifying for domains: {', '.join(domains_to_simplify)}")
-
-    #         # # 1. Store document in vector database (using smaller chunks)
-    #         # self.store_document_in_vector_db(document, chunk_size=1000, overlap=200)
-
-    #         # 2. Split document into processing chunks
-    #         # Use a sentence splitter to create chunks
-    #         splitter = get_sentence_splitter(
-    #             chunk_size=chunk_size, chunk_overlap=chunk_overlap
-    #         )
-    #         # chunks = self.split_text_into_chunks(document, chunk_size, chunk_overlap)
-    #         chunks = splitter.get_nodes_from_documents(documents)
-    #         self.log(f"Split into {len(chunks)} processing chunks")
-
-    #         # 3. Process each chunk with context retrieval
-    #         simplified_chunks = []
-
-    #         # Use ThreadPoolExecutor for parallel processing
-    #         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    #             # Create futures
-    #             futures = [
-    #                 executor.submit(
-    #                     self.process_chunk_with_context_retrieval,
-    #                     chunk.get_content("embed"),
-    #                     profile,
-    #                     i,
-    #                 )
-    #                 for i, chunk in enumerate(chunks)
-    #             ]
-
-    #             # Collect results in order
-    #             for future in futures:
-    #                 simplified_chunks.append(future.result())
-
-    #         # 4. Combine all simplified chunks
-    #         simplified_document = "\n\n".join(simplified_chunks)
-
-    #         # 5. Final pass to ensure consistency across the entire document
-    #         self.log("Performing final pass for consistency...")
-
-    #         consistency_prompt = f"""
-    # You are an expert in creating accessible content for people with cognitive differences.
-    # You have been given a document that has already been simplified based on a cognitive profile.
-    # However, because it was processed in chunks, there may be inconsistencies in terminology,
-    # style, or flow between sections.
-
-    # Your task is to review the document and make minor adjustments to ensure consistency
-    # throughout, while preserving the simplifications already made.
-
-    # COGNITIVE PROFILE:
-    # {json.dumps(profile, indent=2)}
-
-    # DOCUMENT TO REVIEW:
-    # {simplified_document}
-
-    # Please make only the necessary adjustments to ensure consistency while preserving
-    # the accessibility features already implemented.
-
-    # CONSISTENT DOCUMENT:
-    # """
-
-    #         # Check if the document is too long for a final pass
-    #         if self.num_tokens(simplified_document) > chunk_size * 1.5:
-    #             self.log(
-    #                 "Document too long for single final pass, skipping consistency check"
-    #             )
-    #             return simplified_document
-
-    #         final_document = self.call_groq_llm(consistency_prompt)
-
-    #         return final_document
     def process_documents(
         self,
         documents: List[LlamaIndexDocument],

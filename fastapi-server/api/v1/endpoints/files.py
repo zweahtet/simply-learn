@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from services.simplify import TextSimplificationAgent, simplification_progress
+from services.summarize import DocumentSummarizer
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from schemas import ChunkData, CognitiveProfile
@@ -99,16 +100,29 @@ async def process_file(
         # (assuming that documents are stored in vector)
         # Start background processing of chunks
         # Add the simplification as a background task
-        simplifier = TextSimplificationAgent(
+        # simplifier = TextSimplificationAgent(
+        #     user_id=current_user.id,
+        #     file_id=file_id,
+        #     verbose=True
+        # )
+
+        # background_tasks.add_task(
+        #     simplifier.process_documents,
+        #     documents=page_docs,
+        #     cognitive_profile=current_user.cognitive_profile,
+        # )
+
+        # Add the summarization as a background task
+        summarizer = DocumentSummarizer(
             user_id=current_user.id,
             file_id=file_id,
-            verbose=True
+            verbose=True,
         )
 
         background_tasks.add_task(
-            simplifier.process_documents,
-            documents=page_docs,
-            cognitive_profile=current_user.cognitive_profile,
+            summarizer.process_pages,
+            pages=page_docs,
+            # cognitive_profile=current_user.cognitive_profile,
         )
 
         return JSONResponse(
