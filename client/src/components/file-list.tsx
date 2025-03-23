@@ -9,6 +9,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,7 +24,7 @@ import { FileMetadata } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { PlusCircle, FileText, FileIcon } from "lucide-react";
+import { PlusCircle, FileText, FileIcon, EllipsisVertical, Trash } from "lucide-react";
 
 interface SidebarProps {
 	files: FileMetadata[];
@@ -202,7 +210,7 @@ export function FileList({
 										>
 											<div className="flex items-start justify-between">
 												<div>
-													<h3 className="font-semibold">
+													<h3 className="font-semibold line-clamp-1">
 														{item.name}
 													</h3>
 													<p className="text-sm text-muted-foreground">
@@ -215,7 +223,7 @@ export function FileList({
 													"processing" && (
 													<div className="h-4 w-4 flex-shrink-0 rounded-full border-2 border-t-transparent border-primary animate-spin" />
 												)}
-												<Button
+												{/* <Button
 													variant="destructive"
 													size="icon"
 													className="flex-shrink-0 ml-2"
@@ -227,7 +235,31 @@ export function FileList({
 													}}
 												>
 													Delete
-												</Button>
+												</Button> */}
+												<DropdownMenu>
+													<DropdownMenuTrigger asChild className="flex-shrink-0 ml-2">
+														<Button
+															variant="ghost"
+															size="icon"
+														>
+															<EllipsisVertical className="h-3 w-3" />
+														</Button>
+													</DropdownMenuTrigger>
+													<DropdownMenuContent align="end">
+														<DropdownMenuItem
+															className="text-destructive"
+															onClick={(e) => {
+																e.stopPropagation();
+																handleFileDelete(
+																	item.id
+																);
+															}}
+														>
+															<Trash className="h-4 w-4" />
+															Delete
+														</DropdownMenuItem>
+													</DropdownMenuContent>
+												</DropdownMenu>
 											</div>
 										</div>
 									))
