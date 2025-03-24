@@ -47,11 +47,12 @@ FINAL SUMMARY:
 
 
 class DocumentSummarizer:
+
     def __init__(
         self,
         user_id: str,
         file_id: str,
-        llm_model: str = GroqModels.LLAMA_3_70B_VERSATILE,
+        llm_model: str = GroqModels.LLAMA_3_70B_VERSATILE.value,
         verbose: bool = False,
     ):
         self.user_id = user_id
@@ -75,7 +76,7 @@ class DocumentSummarizer:
         model: str,
         prompt: str,
         temperature: float = 0.0,
-        max_completion_tokens: int = 1024,
+        max_completion_tokens: int = 3000,
     ) -> str:
         """
         Call Groq LLM with the given prompt and parameters.
@@ -109,8 +110,8 @@ class DocumentSummarizer:
         reduce_prompt_template: str,
         chunk_size: int = 3000,
         chunk_overlap: int = 100,
-        map_model: str = GroqModels.LLAMA_3_70B_VERSATILE,
-        reduce_model: str = GroqModels.LLAMA_3_70B_VERSATILE,
+        map_model: str = GroqModels.LLAMA_3_70B_VERSATILE.value,
+        reduce_model: str = GroqModels.LLAMA_3_70B_VERSATILE.value,
         max_workers: int = 4,
         verbose: bool = False,
     ) -> str:
@@ -150,7 +151,7 @@ class DocumentSummarizer:
         def process_chunk(chunk: str) -> str:
             prompt = map_prompt_template.format(text=chunk)
             return self.call_groq_llm(
-                prompt, model=map_model, max_completion_tokens=chunk_size
+                prompt=prompt, model=map_model, max_completion_tokens=chunk_size
             )
 
         start_time = time.time()
@@ -173,7 +174,7 @@ class DocumentSummarizer:
         reduce_prompt = reduce_prompt_template.format(summaries=summaries_text)
 
         start_time = time.time()
-        final_summary = self.call_groq_llm(reduce_prompt, model=reduce_model)
+        final_summary = self.call_groq_llm(prompt=reduce_prompt, model=reduce_model)
 
         if verbose:
             reduce_time = time.time() - start_time

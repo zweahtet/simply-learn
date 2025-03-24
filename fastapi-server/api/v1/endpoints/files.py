@@ -7,6 +7,7 @@ import json
 import pymupdf
 import pymupdf4llm
 import re
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union, List, Dict, Any, Annotated
 from pydantic import BaseModel
@@ -113,17 +114,78 @@ async def process_file(
         # )
 
         # Add the summarization as a background task
-        summarizer = DocumentSummarizer(
-            user_id=current_user.id,
-            file_id=file_id,
-            verbose=True,
-        )
+        # summarizer = DocumentSummarizer(
+        #     user_id=current_user.id,
+        #     file_id=file_id,
+        #     verbose=True,
+        # )
 
-        background_tasks.add_task(
-            summarizer.process_pages,
-            pages=page_docs,
-            # cognitive_profile=current_user.cognitive_profile,
-        )
+        # background_tasks.add_task(
+        #     summarizer.process_pages,
+        #     pages=page_docs,
+        #     # cognitive_profile=current_user.cognitive_profile,
+        # )
+
+        # Define a function to run summarization and store results
+        async def summarize_and_store():
+            try:
+                # Set status as "in-progress" in Redis
+                status_key = f"summarization:status:{current_user.id}:{file_id}"
+                redis_client.set(status_key, "in_progress")
+                
+                # Create the summarizer
+                summarizer = DocumentSummarizer(
+                    user_id=current_user.id,
+                    file_id=file_id,
+                    verbose=True,
+                )
+                
+                # Process the pages
+                summary = summarizer.process_pages(pages=page_docs)
+                
+                # Store as a file in the same directory structure
+                summary_file_path = user_file_dir / "summary.json"
+                
+                # Ensure directory exists
+                os.makedirs(os.path.dirname(summary_file_path), exist_ok=True)
+                
+                # Create the summary data
+                summary_data = {
+                    "summary": summary,
+                    "completed_at": datetime.now().isoformat(),
+                    "file_id": file_id,
+                    "user_id": str(current_user.id),
+                    "file_name": file_name
+                }
+                
+                # Save to file
+                with open(summary_file_path, "w", encoding="utf-8") as f:
+                    json.dump(summary_data, f, ensure_ascii=False, indent=2)
+                
+                # Update status in Redis to "completed"
+                redis_client.set(status_key, "completed")
+                
+            except Exception as e:
+                # Log the error
+                print(f"Error in summarization task: {e}")
+                
+                # Set status to "error" in Redis
+                redis_client.set(status_key, "error")
+                
+                # Save error details to a file
+                try:
+                    error_file_path = user_file_dir / "summary_error.json"
+                    error_data = {
+                        "error": str(e),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    with open(error_file_path, "w", encoding="utf-8") as f:
+                        json.dump(error_data, f, ensure_ascii=False, indent=2)
+                except Exception as write_error:
+                    print(f"Error writing error file: {write_error}")
+
+        # Run the summarization in the background
+        background_tasks.add_task(summarize_and_store)
 
         return JSONResponse(
             content={
@@ -141,7 +203,6 @@ async def process_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing file: {str(e)}",
         )
-
 
 @router.get("/simplification-progress/{file_id}")
 async def get_simplification_progress(request: Request, file_id: str):
@@ -174,3 +235,78 @@ async def get_simplification_progress(request: Request, file_id: str):
             await asyncio.sleep(0.5)  # Update every 500ms
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/{file_id}/summary", description="Get the summary of a file")
+async def get_summary(
+    file_id: str,
+    redis_client: RedisDep,
+    current_user: CurrentActiveUserDep
+):
+    # Check status in Redis
+    status_key = f"summarization:status:{current_user.id}:{file_id}"
+    task_status = redis_client.get(status_key)
+
+    # User directory where files are stored
+    user_file_dir = pathlib.Path(f"{FILE_UPLOAD_DIR}/{current_user.id}/files/{file_id}")
+    summary_file_path = user_file_dir / "summary.json"
+
+    # If still in progress
+    if task_status == "in_progress":
+        return JSONResponse(
+            content={
+                "status": "processing",
+                "message": "Summarization is still in progress.",
+            },
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+
+    # If completed, return the summary from the file
+    elif task_status == "completed" and summary_file_path.exists():
+        try:
+            with open(summary_file_path, "r") as f:
+                summary_data = json.load(f)
+
+            return JSONResponse(
+                content={
+                    "status": "completed",
+                    "fileId": file_id,
+                    "summary": summary_data["summary"],
+                    "completedAt": summary_data["completed_at"],
+                },
+                status_code=status.HTTP_200_OK,
+            )
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            # Handle file reading errors
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": f"Error reading summary file: {str(e)}",
+                },
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    # If there was an error
+    elif task_status == "error":
+        error_file_path = user_file_dir / "summary_error.json"
+        error_message = "Unknown error occurred"
+
+        if error_file_path.exists():
+            try:
+                with open(error_file_path, "r") as f:
+                    error_data = json.load(f)
+                    error_message = error_data.get("error", error_message)
+            except:
+                pass
+
+        return JSONResponse(
+            content={"status": "error", "message": error_message},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    # If not found or other issue
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No summarization found for file ID: {file_id}",
+        )
