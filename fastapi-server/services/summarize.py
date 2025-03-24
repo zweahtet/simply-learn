@@ -212,10 +212,3 @@ class DocumentSummarizer:
             reduce_prompt_template=reduce_prompt,
             **kwargs,
         )
-
-
-# summary = summarize_document_from_file(
-#     file_path="paper_1_output.md",
-#     map_prompt=DEFAULT_MAP_PROMPT,
-#     reduce_prompt=DEFAULT_REDUCE_PROMPT,
-# )
