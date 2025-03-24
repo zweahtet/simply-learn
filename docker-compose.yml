@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api:
     build: 
@@ -14,10 +12,27 @@ services:
     environment:
       - PYTHONPATH=/app
     restart: always
-    # If you need to connect to other services like a database,
-    # you can add them here and define them as separate services below
-    # depends_on:
-    #   - db
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    env_file:
+      - ./fastapi-server/.env
+    command: redis-server --save 60 1 --loglevel warning
+
+volumes:
+  redis_data:
+
   
   # Example database service if needed:
   # db:
