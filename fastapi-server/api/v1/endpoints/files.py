@@ -10,14 +10,14 @@ import re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union, List, Dict, Any, Annotated
-from pydantic import BaseModel
-from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Request
+from pydantic import BaseModel, Field
+from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Request, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from services.simplify import TextSimplificationAgent, simplification_progress
 from services.summarize import DocumentSummarizer
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
-from schemas import ChunkData, CognitiveProfile
+from schemas import BaseRequest, BaseResponse
 from api.dependencies import RedisDep, CurrentActiveUserDep
 
 router = APIRouter()
@@ -33,50 +33,50 @@ CACHE_TTL = 60 * 60 * 24 * 7  # 1 week
 os.makedirs(FILE_UPLOAD_DIR, exist_ok=True)
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
+
 # ----- API Endpoints -----
+class FileUploadResponse(BaseResponse):
+    """
+    Response schema for file upload.
+    """
+
+    status: str = Field(description="Status of the file upload")
+    message: Optional[str] = Field(description="Additional message or error details")
+    file_id: Optional[str] = Field(
+        description="Unique identifier for the uploaded file"
+    )
+
+
 @router.post("/process-file")
 async def process_file(
     background_tasks: BackgroundTasks,
     redis_client: RedisDep,
     current_user: CurrentActiveUserDep,
-    file: Annotated[UploadFile, File(...)],
+    file_id: Annotated[str, Form(...)],
+    file: Annotated[UploadFile, File(...)]
 ):
     """Process an uploaded PDF file and extract content"""   
-    # Check file size
-    if file.size > 10 * 1024 * 1024:  # 10 MB limit
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File size exceeds 10 MB limit")
-
-    # Check file type
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file type. Only PDF files are supported.")
-
-    # # Check if the file is empty
-    # if file.file.read(0) == b"":
-    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File is empty")
-
-    # # Reset file pointer to the beginning
-    # file.file.seek(0)
-
-    # Create a unique ID for this file
-    file_id = uuid.uuid4().hex[:8]  # Shortened UUID for simplicity
-
-    # Senatize file name
-    file_name: str = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
-
-    # Cut off the file name if it exceeds 255 characters
-    if len(file_name) > 255:
-        file_name = file_name[:255]
-
-    # Create a unique file path
-    # Create a more organized directory structure
-    # Main user directory with file-specific subdirectory
-    user_file_dir = pathlib.Path(f"{FILE_UPLOAD_DIR}/{current_user.id}/files/{file_id}")
-
-    # Define file path and image directory
-    file_path = pathlib.Path(user_file_dir / file_name)
-    image_path = user_file_dir / "images"
-
     try:
+        # Create a unique ID for this file
+        # file_id = uuid.uuid4().hex[:8]  # Shortened UUID for simplicity
+
+        # Senatize file name
+        # filename: str = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
+        filename = file.filename
+
+        # Cut off the file name if it exceeds 255 characters
+        if len(filename) > 255:
+            filename = filename[:255]
+
+        # Main user directory with file-specific subdirectory
+        user_file_dir = pathlib.Path(
+            f"{FILE_UPLOAD_DIR}/{current_user.id}/files/{file_id}"
+        )
+
+        # Define file path and image directory
+        file_path = pathlib.Path(user_file_dir / filename)
+        image_path = user_file_dir / "images"
+
         # Check if the file already exists
         # if os.path.exists(file_path):
         #     # return the existing simplified file id
@@ -113,65 +113,51 @@ async def process_file(
         #     cognitive_profile=current_user.cognitive_profile,
         # )
 
-        # Add the summarization as a background task
-        # summarizer = DocumentSummarizer(
-        #     user_id=current_user.id,
-        #     file_id=file_id,
-        #     verbose=True,
-        # )
-
-        # background_tasks.add_task(
-        #     summarizer.process_pages,
-        #     pages=page_docs,
-        #     # cognitive_profile=current_user.cognitive_profile,
-        # )
-
         # Define a function to run summarization and store results
         async def summarize_and_store():
             try:
                 # Set status as "in-progress" in Redis
                 status_key = f"summarization:status:{current_user.id}:{file_id}"
                 redis_client.set(status_key, "in_progress")
-                
+
                 # Create the summarizer
                 summarizer = DocumentSummarizer(
                     user_id=current_user.id,
                     file_id=file_id,
                     verbose=True,
                 )
-                
+
                 # Process the pages
                 summary = summarizer.process_pages(pages=page_docs)
-                
+
                 # Store as a file in the same directory structure
                 summary_file_path = user_file_dir / "summary.json"
-                
+
                 # Ensure directory exists
                 os.makedirs(os.path.dirname(summary_file_path), exist_ok=True)
-                
+
                 # Create the summary data
                 summary_data = {
                     "summary": summary,
                     "completed_at": datetime.now().isoformat(),
                     "file_id": file_id,
-                    "user_id": str(current_user.id),
-                    "file_name": file_name
+                    "filename": filename,
                 }
-                
+
                 # Save to file
                 with open(summary_file_path, "w", encoding="utf-8") as f:
                     json.dump(summary_data, f, ensure_ascii=False, indent=2)
-                
+
                 # Update status in Redis to "completed"
                 redis_client.set(status_key, "completed")
-                
+
             except Exception as e:
                 # Log the error
                 print(f"Error in summarization task: {e}")
-                
+
                 # Set status to "error" in Redis
                 redis_client.set(status_key, "error")
-                
+
                 # Save error details to a file
                 try:
                     error_file_path = user_file_dir / "summary_error.json"
@@ -186,23 +172,24 @@ async def process_file(
 
         # Run the summarization in the background
         background_tasks.add_task(summarize_and_store)
-
         return JSONResponse(
             content={
-                "fileId": file_id,
-                "filename": file_name,
-                "title": file.filename,
-                "totalPages": len(page_docs),
+                "id": file_id,
+                "name": filename,
+                "type": file.content_type,
+                "size": file.size,
             },
             status_code=status.HTTP_201_CREATED,
         )
     except Exception as e:
-        # Handle errors
-        print(f"Error processing file: {e}")
-        return HTTPException(
+        # Handle any errors that occur during file processing
+        return JSONResponse(
+            content={
+                "message": str(e),
+            },
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing file: {str(e)}",
         )
+
 
 @router.get("/simplification-progress/{file_id}")
 async def get_simplification_progress(request: Request, file_id: str):
