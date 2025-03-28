@@ -1,6 +1,7 @@
 // simply-learn/client/src/components/file-list.tsx
 "use client";
-import {useState, useEffect, useCallback, useRef } from "react";
+import useSWR from "swr";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ import { FileMetadata } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
 	PlusCircle,
 	FileText,
@@ -34,11 +36,24 @@ import {
 	Trash,
 } from "lucide-react";
 import { SupabaseConfig } from "@/lib/defaults";
+import { getFiles, deleteFile } from "@/lib/backend/files";
 
 const supabase = createClient();
 
+// Add a function to format file size
+const formatFileSize = (bytes: number): string => {
+	if (bytes === 0) return "0 Bytes";
+
+	const k = 1024;
+	const sizes = ["Bytes", "KB", "MB", "GB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+	return (
+		Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+	);
+};
+
 interface FileListCardProps {
-	fileMetadataMap: Map<string, FileMetadata>;
 	selectedFile: FileMetadata | null;
 	onFileSelect: (file: FileMetadata | null) => void;
 }
@@ -50,17 +65,171 @@ type FileUploadStatus =
 	| "error"
 	| undefined;
 
+interface AttachmentItemProps {
+	item: FileMetadata;
+	isActive: boolean;
+	onDelete: (fileId: string) => void;
+	uploadStatusMap: Map<string, FileUploadStatus>;
+}
+
+const PureAttachmentItem = ({
+	item,
+	isActive,
+	onDelete,
+	uploadStatusMap,
+}: AttachmentItemProps) => {
+	return (
+		<div
+			key={item.id}
+			className={cn(
+				"rounded-lg border bg-card p-4 transition-all hover:shadow-md relative overflow-hidden",
+				isActive && "bg-muted"
+			)}
+			// onClick={() => onFileSelect(item)}
+		>
+			{/* Show loading animation depending on the upload status */}
+			{uploadStatusMap.get(item.id) && (
+				<div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+					{uploadStatusMap.get(item.id) === "pending" && (
+						<div className="flex flex-col items-center gap-2">
+							<FileIcon className="h-6 w-6 text-muted-foreground animate-pulse" />
+							<p className="text-sm font-medium">Preparing...</p>
+						</div>
+					)}
+					{uploadStatusMap.get(item.id) === "uploading" && (
+						<div className="flex flex-col items-center gap-2">
+							<svg
+								className="animate-spin h-6 w-6 text-primary"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+							>
+								<circle
+									className="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									strokeWidth="4"
+								></circle>
+								<path
+									className="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								></path>
+							</svg>
+							<p className="text-sm font-medium">Uploading...</p>
+						</div>
+					)}
+					{uploadStatusMap.get(item.id) === "completed" && (
+						<div className="flex flex-col items-center gap-2 text-green-500">
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								className="h-6 w-6"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							<p className="text-sm font-medium">Uploaded</p>
+						</div>
+					)}
+					{uploadStatusMap.get(item.id) === "error" && (
+						<div className="flex flex-col items-center gap-2 text-destructive">
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								className="h-6 w-6"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									strokeWidth={2}
+									d="M6 18L18 6M6 6l12 12"
+								/>
+							</svg>
+							<p className="text-sm font-medium">Error</p>
+						</div>
+					)}
+				</div>
+			)}
+			<div className="flex items-start justify-between">
+				<div>
+					<h3 className="font-semibold line-clamp-1">{item.name}</h3>
+					<p className="text-sm text-muted-foreground">
+						{formatFileSize(item.size)}
+					</p>
+				</div>
+				<DropdownMenu>
+					<DropdownMenuTrigger asChild className="flex-shrink-0 ml-2">
+						<Button variant="ghost" size="icon">
+							<EllipsisVertical className="h-3 w-3" />
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end">
+						<DropdownMenuItem
+							className="text-destructive"
+							onClick={(e) => {
+								e.stopPropagation();
+								onDelete(item.id);
+							}}
+						>
+							<Trash className="h-4 w-4" />
+							Delete
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</div>
+		</div>
+	);
+};
+
+export const AttachmentItem = memo(
+	PureAttachmentItem,
+	(prevProps, nextProps) => {
+		return prevProps.item.id === nextProps.item.id;
+	}
+);
+
 export function FileListCard({
-	fileMetadataMap,
 	onFileSelect,
 	selectedFile,
 }: FileListCardProps) {
 	const { user } = useAuth();
+	if (!user) return null;
+
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [uploadStatusMap, setUploadStatusMap] = useState<
 		Map<string, FileUploadStatus>
-		>(new Map<string, undefined>());
+	>(new Map<string, undefined>());
 	const [percentUsed, setPercentUsed] = useState<number>(0);
+
+	const {
+		data: fileMetadataMap,
+		isLoading,
+		mutate,
+	} = useSWR<Map<string, FileMetadata>>(
+		user ? `${user.id}` : null,
+		getFiles,
+		{
+			onError: (err) => {
+				console.error("Error fetching files:", err);
+				toast.error("Something went wrong while loading files.");
+			},
+			// fallbackData: new Map<string, FileMetadata>(),
+			revalidateOnFocus: false,
+			revalidateOnReconnect: false,
+			revalidateIfStale: false,
+		}
+	);
 
 	// can we memoize this function?
 	const generateFileId = useCallback(
@@ -79,49 +248,24 @@ export function FileListCard({
 	);
 
 	const handleFileDelete = (fileId: string) => {
-		const bucket = "attachments";
-		const folderPath = `${user?.id}/${fileId}`;
-
-		// list all files in the folder
-		supabase.storage
-			.from(bucket)
-			.list(folderPath)
-			.then((listResponse) => {
-				if (listResponse.error) {
-					console.error("Error listing files:", listResponse.error);
+		toast.promise(deleteFile(user.id, fileId), {
+			loading: "Deleting file...",
+			success: () => {
+				mutate((preFiles) => {
+					const newMap = new Map<string, FileMetadata>(preFiles);
+					newMap.delete(fileId);
+					return newMap;
+				});
+				if (selectedFile?.id === fileId) {
+					onFileSelect(null);
 				}
-
-				if (!listResponse.data) {
-					return;
-				}
-
-				// create array of file paths to delete
-				const filesToDelete = listResponse.data.map(
-					(file) => `${folderPath}/${file.name}`
-				);
-
-				// delete all files in the folder
-				supabase.storage
-					.from(bucket)
-					.remove(filesToDelete)
-					.then((deleteResponse) => {
-						if (deleteResponse.error) {
-							console.error(
-								"Error deleting files:",
-								deleteResponse.error
-							);
-						}
-
-						if (selectedFile?.id === fileId) {
-							onFileSelect(null);
-						}
-						toast.success("File deleted successfully");
-					});
-			})
-			.catch((error) => {
+				return "File deleted successfully";
+			},
+			error: (error) => {
 				console.error("Error when deleting file:", error);
-				toast.error("Something went wrong while deleting the file");
-			});
+				return "Something went wrong while deleting the file. Try again later.";
+			},
+		});
 	};
 
 	const uploadFiles = async (toUpload: Map<string, File>) => {
@@ -137,7 +281,7 @@ export function FileListCard({
 		// Use Promise.all to handle multiple uploads
 		const uploadPromises = Array.from(toUpload.entries()).map(
 			([fileId, file]) => {
-				return new Promise<{ id: string }>(async (resolve, reject) => {
+				return new Promise<FileMetadata>(async (resolve, reject) => {
 					try {
 						const filePath = `${user?.id}/${fileId}/${file.name}`;
 						const supabaseSignedUploadUrlResponse =
@@ -179,7 +323,12 @@ export function FileListCard({
 						setUploadStatusMap(new Map(statusMap));
 
 						// Resolve with file id
-						resolve({ id: fileId });
+						resolve({
+							id: fileId,
+							name: file.name,
+							type: file.type,
+							size: file.size,
+						});
 					} catch (error) {
 						statusMap.set(fileId, "error");
 						setUploadStatusMap(new Map(statusMap));
@@ -216,7 +365,7 @@ export function FileListCard({
 		// Check for duplicate files
 		Array.from(selectedFiles).forEach((file) => {
 			const fileId = generateFileId(file.name, file.size);
-			if (fileMetadataMap.has(fileId)) {
+			if (fileMetadataMap?.has(fileId)) {
 				// File already exists
 				toast.error(`File already exists: ${file.name}`);
 				// Reset the file input
@@ -237,37 +386,47 @@ export function FileListCard({
 			toUpload.set(fileId, file);
 		});
 
-		try {
-			// Upload files and get server responses
-			const results = await uploadFiles(toUpload);
-			console.log("Upload results:", results);
-		} catch (error) {
-			toast.error("Error uploading files");
-		} finally {
-			if (fileInputRef.current) {
-				fileInputRef.current.value = "";
-			}
-			// Clear progress map
-			setUploadStatusMap(new Map<string, FileUploadStatus>());
-		}
-	};
+		// Upload files and get server responses
+		// const uploadPromise = uploadFiles(toUpload);
+		// toast.promise(uploadPromise, {
+		// 	loading: "Uploading files...",
+		// 	success: (newFiles) => {
+		// 		mutate((preFiles) => {
+		// 			const newMap = new Map<string, FileMetadata>(preFiles);
+		// 			newFiles.forEach((file) => {
+		// 				newMap.set(file.id, file);
+		// 			});
+		// 			return newMap;
+		// 		})
+		// 		return "Files uploaded successfully";
+		// 	},
+		// 	error: "Failed to upload files",
+		// })
+		await uploadFiles(toUpload)
+			.then((newFiles) => {
+				mutate((preFiles) => {
+					const newMap = new Map<string, FileMetadata>(preFiles);
+					newFiles.forEach((file) => {
+						newMap.set(file.id, file);
+					});
+					return newMap;
+				});
+				toast.success("Files uploaded successfully");
 
-	// Add a function to format file size
-	const formatFileSize = (bytes: number): string => {
-		if (bytes === 0) return "0 Bytes";
-
-		const k = 1024;
-		const sizes = ["Bytes", "KB", "MB", "GB"];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-		return (
-			Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) +
-			" " +
-			sizes[i]
-		);
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
+				}
+				// Clear progress map
+				setUploadStatusMap(new Map<string, FileUploadStatus>());
+			})
+			.catch((error) => {
+				console.error("Upload error:", error);
+				toast.error("Failed to upload files");
+			});
 	};
 
 	useEffect(() => {
+		if (!fileMetadataMap) return;
 		const totalSize = Array.from(fileMetadataMap.values()).reduce(
 			(total, file) => total + file.size,
 			0
@@ -307,167 +466,39 @@ export function FileListCard({
 				<CardContent className="flex-1 p-0">
 					<ScrollArea className="h-[calc(100vh-10rem)]">
 						<div className="p-4">
-							<div className="grid gap-4">
-								{Array.from(fileMetadataMap.values()).length === 0 ? (
-									<div className="p-4 text-center text-muted-foreground text-sm w-full">
-										No files uploaded yet
-									</div>
-								) : (
-									Array.from(fileMetadataMap.values()).map(
-										(item) => (
-											<div
-												key={item.id}
-												className={cn(
-													"rounded-lg border bg-card p-4 transition-all hover:shadow-md relative overflow-hidden",
-													selectedFile?.id ===
-														item.id && "bg-muted"
-												)}
-												onClick={() =>
-													onFileSelect(item)
-												}
-											>
-												{/* Show loading animation depending on the upload status */}
-												{uploadStatusMap.get(
-													item.id
-												) && (
-													<div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-														{uploadStatusMap.get(
-															item.id
-														) === "pending" && (
-															<div className="flex flex-col items-center gap-2">
-																<FileIcon className="h-6 w-6 text-muted-foreground animate-pulse" />
-																<p className="text-sm font-medium">
-																	Preparing...
-																</p>
-															</div>
-														)}
-														{uploadStatusMap.get(
-															item.id
-														) === "uploading" && (
-															<div className="flex flex-col items-center gap-2">
-																<svg
-																	className="animate-spin h-6 w-6 text-primary"
-																	xmlns="http://www.w3.org/2000/svg"
-																	fill="none"
-																	viewBox="0 0 24 24"
-																>
-																	<circle
-																		className="opacity-25"
-																		cx="12"
-																		cy="12"
-																		r="10"
-																		stroke="currentColor"
-																		strokeWidth="4"
-																	></circle>
-																	<path
-																		className="opacity-75"
-																		fill="currentColor"
-																		d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-																	></path>
-																</svg>
-																<p className="text-sm font-medium">
-																	Uploading...
-																</p>
-															</div>
-														)}
-														{uploadStatusMap.get(
-															item.id
-														) === "completed" && (
-															<div className="flex flex-col items-center gap-2 text-green-500">
-																<svg
-																	xmlns="http://www.w3.org/2000/svg"
-																	className="h-6 w-6"
-																	fill="none"
-																	viewBox="0 0 24 24"
-																	stroke="currentColor"
-																>
-																	<path
-																		strokeLinecap="round"
-																		strokeLinejoin="round"
-																		strokeWidth={
-																			2
-																		}
-																		d="M5 13l4 4L19 7"
-																	/>
-																</svg>
-																<p className="text-sm font-medium">
-																	Uploaded
-																</p>
-															</div>
-														)}
-														{uploadStatusMap.get(
-															item.id
-														) === "error" && (
-															<div className="flex flex-col items-center gap-2 text-destructive">
-																<svg
-																	xmlns="http://www.w3.org/2000/svg"
-																	className="h-6 w-6"
-																	fill="none"
-																	viewBox="0 0 24 24"
-																	stroke="currentColor"
-																>
-																	<path
-																		strokeLinecap="round"
-																		strokeLinejoin="round"
-																		strokeWidth={
-																			2
-																		}
-																		d="M6 18L18 6M6 6l12 12"
-																	/>
-																</svg>
-																<p className="text-sm font-medium">
-																	Error
-																</p>
-															</div>
-														)}
-													</div>
-												)}
-												<div className="flex items-start justify-between">
-													<div>
-														<h3 className="font-semibold line-clamp-1">
-															{item.name}
-														</h3>
-														<p className="text-sm text-muted-foreground">
-															{formatFileSize(
-																item.size
-															)}
-														</p>
-													</div>
-													<DropdownMenu>
-														<DropdownMenuTrigger
-															asChild
-															className="flex-shrink-0 ml-2"
-														>
-															<Button
-																variant="ghost"
-																size="icon"
-															>
-																<EllipsisVertical className="h-3 w-3" />
-															</Button>
-														</DropdownMenuTrigger>
-														<DropdownMenuContent align="end">
-															<DropdownMenuItem
-																className="text-destructive"
-																onClick={(
-																	e
-																) => {
-																	e.stopPropagation();
-																	handleFileDelete(
-																		item.id
-																	);
-																}}
-															>
-																<Trash className="h-4 w-4" />
-																Delete
-															</DropdownMenuItem>
-														</DropdownMenuContent>
-													</DropdownMenu>
-												</div>
-											</div>
+							{isLoading ? (
+								<div className="grid gap-4">
+									{Array.from({ length: 5 }).map(
+										(_, index) => (
+											<Skeleton
+												key={index}
+												className="h-16 w-full rounded-lg"
+											/>
 										)
-									)
-								)}
-							</div>
+									)}
+								</div>
+							) : Array.from(fileMetadataMap?.values() || [])
+									.length === 0 ? (
+								<div className="p-4 text-center text-muted-foreground text-sm w-full">
+									No files uploaded yet
+								</div>
+							) : (
+								<div className="grid gap-4">
+									{Array.from(
+										fileMetadataMap?.values() || []
+									).map((item) => (
+										<AttachmentItem
+											key={item.id}
+											item={item}
+											isActive={
+												selectedFile?.id === item.id
+											}
+											onDelete={handleFileDelete}
+											uploadStatusMap={uploadStatusMap}
+										/>
+									))}
+								</div>
+							)}
 						</div>
 					</ScrollArea>
 				</CardContent>
