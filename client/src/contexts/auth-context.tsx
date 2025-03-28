@@ -18,6 +18,7 @@ interface AuthContextType {
 		profile: UserProfile
 	) => Promise<void>;
 	signOut: () => Promise<void>;
+	getJWTToken: () => Promise<string | undefined>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -125,6 +126,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		if (error) throw error;
 	}
 
+	async function getJWTToken() {
+		const { data, error } = await supabase.auth.getSession();
+		if (error) throw error;
+		return data.session?.access_token;
+	}
+
 	const value = {
 		session,
 		user,
@@ -133,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		signIn,
 		signUp,
 		signOut,
+		getJWTToken,
 	};
 
 	return (

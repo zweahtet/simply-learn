@@ -69,6 +69,7 @@ interface AttachmentItemProps {
 	item: FileMetadata;
 	isActive: boolean;
 	onDelete: (fileId: string) => void;
+	onSelect: (file: FileMetadata) => void;
 	uploadStatusMap: Map<string, FileUploadStatus>;
 }
 
@@ -76,6 +77,7 @@ const PureAttachmentItem = ({
 	item,
 	isActive,
 	onDelete,
+	onSelect,
 	uploadStatusMap,
 }: AttachmentItemProps) => {
 	return (
@@ -85,7 +87,9 @@ const PureAttachmentItem = ({
 				"rounded-lg border bg-card p-4 transition-all hover:shadow-md relative overflow-hidden",
 				isActive && "bg-muted"
 			)}
-			// onClick={() => onFileSelect(item)}
+			onClick={() => onSelect(item)}
+			role="button"
+			aria-label={`Select ${item.name}`}
 		>
 			{/* Show loading animation depending on the upload status */}
 			{uploadStatusMap.get(item.id) && (
@@ -465,6 +469,7 @@ export function FileListCard({
 													selectedFile?.id === item.id
 												}
 												onDelete={handleFileDelete}
+												onSelect={onFileSelect}
 												uploadStatusMap={
 													uploadStatusMap
 												}
