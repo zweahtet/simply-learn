@@ -36,7 +36,7 @@ import {
 	Trash,
 } from "lucide-react";
 import { SupabaseConfig } from "@/lib/defaults";
-import { getFiles, deleteFile } from "@/lib/backend/files";
+import { getFiles, deleteFile, uploadFile } from "@/lib/backend/files";
 
 const supabase = createClient();
 
@@ -195,7 +195,13 @@ const PureAttachmentItem = ({
 export const AttachmentItem = memo(
 	PureAttachmentItem,
 	(prevProps, nextProps) => {
-		return prevProps.item.id === nextProps.item.id;
+		// Only re-render if the item ID changes OR if the upload status changes
+		return (
+			prevProps.item.id === nextProps.item.id &&
+			prevProps.uploadStatusMap.get(prevProps.item.id) ===
+				nextProps.uploadStatusMap.get(nextProps.item.id) &&
+			prevProps.isActive === nextProps.isActive
+		);
 	}
 );
 
@@ -204,8 +210,6 @@ export function FileListCard({
 	selectedFile,
 }: FileListCardProps) {
 	const { user } = useAuth();
-	if (!user) return null;
-
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const [uploadStatusMap, setUploadStatusMap] = useState<
 		Map<string, FileUploadStatus>
@@ -213,23 +217,23 @@ export function FileListCard({
 	const [percentUsed, setPercentUsed] = useState<number>(0);
 
 	const {
-		data: fileMetadataMap,
+		data: fileMetadataList,
 		isLoading,
 		mutate,
-	} = useSWR<Map<string, FileMetadata>>(
-		user ? `${user.id}` : null,
-		getFiles,
-		{
-			onError: (err) => {
-				console.error("Error fetching files:", err);
-				toast.error("Something went wrong while loading files.");
-			},
-			// fallbackData: new Map<string, FileMetadata>(),
-			revalidateOnFocus: false,
-			revalidateOnReconnect: false,
-			revalidateIfStale: false,
-		}
-	);
+	} = useSWR<Array<FileMetadata>>(user ? `${user.id}` : null, getFiles, {
+		onError: (err) => {
+			console.error("Error fetching files:", err);
+			toast.error("Something went wrong while loading files.");
+		},
+		// fallbackData: new Map<string, FileMetadata>(),
+		revalidateOnFocus: false,
+		revalidateOnReconnect: false,
+		revalidateIfStale: false,
+	});
+
+	// useEffect(() => {
+	// 	mutate();
+	// }, [fileMetadataList, mutate]);
 
 	// can we memoize this function?
 	const generateFileId = useCallback(
@@ -248,14 +252,18 @@ export function FileListCard({
 	);
 
 	const handleFileDelete = (fileId: string) => {
+		if (!user || !fileMetadataList) return;
 		toast.promise(deleteFile(user.id, fileId), {
 			loading: "Deleting file...",
 			success: () => {
-				mutate((preFiles) => {
-					const newMap = new Map<string, FileMetadata>(preFiles);
-					newMap.delete(fileId);
-					return newMap;
-				});
+				mutate((fileMetadataList) => {
+					if (fileMetadataList) {
+						return fileMetadataList.filter(
+							(metadata) => metadata.id !== fileId
+						);
+					}
+				}, false);
+
 				if (selectedFile?.id === fileId) {
 					onFileSelect(null);
 				}
@@ -268,86 +276,8 @@ export function FileListCard({
 		});
 	};
 
-	const uploadFiles = async (toUpload: Map<string, File>) => {
-		// Create a map to store progress for each file
-		const statusMap = new Map<string, FileUploadStatus>();
-
-		// Set initial
-		toUpload.forEach((_, fileId) => {
-			statusMap.set(fileId, "pending");
-		});
-		setUploadStatusMap(new Map(statusMap));
-
-		// Use Promise.all to handle multiple uploads
-		const uploadPromises = Array.from(toUpload.entries()).map(
-			([fileId, file]) => {
-				return new Promise<FileMetadata>(async (resolve, reject) => {
-					try {
-						const filePath = `${user?.id}/${fileId}/${file.name}`;
-						const supabaseSignedUploadUrlResponse =
-							await supabase.storage
-								.from(SupabaseConfig.ATTACHMENT_BUCKET)
-								.createSignedUploadUrl(filePath, {
-									upsert: true,
-								});
-
-						if (supabaseSignedUploadUrlResponse.error) {
-							toast.error("Error creating signed upload URL");
-							reject(supabaseSignedUploadUrlResponse.error);
-							return;
-						}
-						// Update progress map
-						statusMap.set(fileId, "uploading");
-						setUploadStatusMap(new Map(statusMap));
-
-						const { token, path } =
-							supabaseSignedUploadUrlResponse.data;
-						const reponse = await supabase.storage
-							.from(SupabaseConfig.ATTACHMENT_BUCKET)
-							.uploadToSignedUrl(path, token, file, {
-								upsert: true,
-								contentType: file.type,
-								metadata: {
-									name: file.name,
-									size: file.size.toString(),
-									type: file.type,
-									createdBy: user?.id,
-								},
-							});
-						if (reponse.error) {
-							reject(reponse.error);
-						}
-
-						// Update progress map
-						statusMap.set(fileId, "completed");
-						setUploadStatusMap(new Map(statusMap));
-
-						// Resolve with file id
-						resolve({
-							id: fileId,
-							name: file.name,
-							type: file.type,
-							size: file.size,
-						});
-					} catch (error) {
-						statusMap.set(fileId, "error");
-						setUploadStatusMap(new Map(statusMap));
-						reject(error);
-					}
-				});
-			}
-		);
-
-		try {
-			const results = await Promise.all(uploadPromises);
-			return results;
-		} catch (error) {
-			console.error("Upload error:", error);
-			throw error;
-		}
-	};
-
 	const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+		if (!user || !fileMetadataList) return;
 		const selectedFiles = e.target.files;
 		if (!selectedFiles || selectedFiles.length === 0) return;
 
@@ -365,7 +295,7 @@ export function FileListCard({
 		// Check for duplicate files
 		Array.from(selectedFiles).forEach((file) => {
 			const fileId = generateFileId(file.name, file.size);
-			if (fileMetadataMap?.has(fileId)) {
+			if (fileMetadataList.find((f) => f.id === fileId)) {
 				// File already exists
 				toast.error(`File already exists: ${file.name}`);
 				// Reset the file input
@@ -376,66 +306,112 @@ export function FileListCard({
 			}
 		});
 
-		// Process files
-		setUploadStatusMap(new Map<string, FileUploadStatus>());
+		// Create a new status map
+		const newStatusMap = new Map<string, FileUploadStatus>();
 
-		// create a map to store files and ids to be uploaded
-		const toUpload = new Map<string, File>();
+		// Add all files with "pending" status
 		Array.from(selectedFiles).forEach((file) => {
 			const fileId = generateFileId(file.name, file.size);
-			toUpload.set(fileId, file);
+			newStatusMap.set(fileId, "pending");
 		});
 
-		// Upload files and get server responses
-		// const uploadPromise = uploadFiles(toUpload);
-		// toast.promise(uploadPromise, {
-		// 	loading: "Uploading files...",
-		// 	success: (newFiles) => {
-		// 		mutate((preFiles) => {
-		// 			const newMap = new Map<string, FileMetadata>(preFiles);
-		// 			newFiles.forEach((file) => {
-		// 				newMap.set(file.id, file);
-		// 			});
-		// 			return newMap;
-		// 		})
-		// 		return "Files uploaded successfully";
-		// 	},
-		// 	error: "Failed to upload files",
-		// })
-		await uploadFiles(toUpload)
-			.then((newFiles) => {
-				mutate((preFiles) => {
-					const newMap = new Map<string, FileMetadata>(preFiles);
-					newFiles.forEach((file) => {
-						newMap.set(file.id, file);
-					});
-					return newMap;
-				});
-				toast.success("Files uploaded successfully");
+		// Set initial status map
+		setUploadStatusMap(newStatusMap);
 
-				if (fileInputRef.current) {
-					fileInputRef.current.value = "";
-				}
-				// Clear progress map
-				setUploadStatusMap(new Map<string, FileUploadStatus>());
-			})
-			.catch((error) => {
-				console.error("Upload error:", error);
-				toast.error("Failed to upload files");
+		// Optimistically update UI
+		mutate((prevFiles) => {
+			if (prevFiles) {
+				return [
+					...prevFiles,
+					...Array.from(selectedFiles).map((file) => ({
+						id: generateFileId(file.name, file.size),
+						name: file.name,
+						type: file.type,
+						size: file.size,
+					})),
+				];
+			}
+		}, false); // false means don't revalidate yet
+
+		// Create upload promises
+		const uploadPromises = Array.from(selectedFiles).map((file) => {
+			const fileId = generateFileId(file.name, file.size);
+
+			// Update to "uploading" status
+			setUploadStatusMap((prevMap) => {
+				const updatedMap = new Map(prevMap);
+				updatedMap.set(fileId, "uploading");
+				return updatedMap;
 			});
+
+			return uploadFile(user.id, file, fileId)
+				.then((fileMetadata) => {
+					// Update to "completed" status
+					setUploadStatusMap((prevMap) => {
+						const updatedMap = new Map(prevMap);
+						updatedMap.set(fileId, "completed");
+						return updatedMap;
+					});
+					return fileMetadata;
+				})
+				.catch((error) => {
+					console.error("Upload error:", error);
+					// Update to "error" status
+					setUploadStatusMap((prevMap) => {
+						const updatedMap = new Map(prevMap);
+						updatedMap.set(fileId, "error");
+						return updatedMap;
+					});
+					throw error;
+				});
+		});
+
+		// Reset file input immediately
+		if (fileInputRef.current) {
+			fileInputRef.current.value = "";
+		}
+
+		// Wait for all uploads to complete
+		try {
+			await Promise.all(uploadPromises);
+			// Revalidate data from server
+			mutate();
+
+			// Set a timeout before clearing the status map
+			// This gives users a chance to see the "completed" status
+			setTimeout(() => {
+				setUploadStatusMap(new Map());
+			}, 1500); // 1.5 seconds delay
+		} catch (error) {
+			console.error("Some uploads failed:", error);
+			// Still revalidate
+			mutate();
+
+			// Keep error statuses visible for longer
+			setTimeout(() => {
+				// Only clear statuses for completed uploads
+				setUploadStatusMap((prevMap) => {
+					const finalMap = new Map(prevMap);
+					for (const [fileId, status] of finalMap.entries()) {
+						if (status === "completed") {
+							finalMap.delete(fileId);
+						}
+					}
+					return finalMap;
+				});
+			}, 3000); // 3 seconds delay for errors
+		}
 	};
 
 	useEffect(() => {
-		if (!fileMetadataMap) return;
-		const totalSize = Array.from(fileMetadataMap.values()).reduce(
+		if (!fileMetadataList) return;
+		const totalSize = fileMetadataList.reduce(
 			(total, file) => total + file.size,
 			0
 		);
-		// const totalSizeFormatted = formatFileSize(totalSize);
-		// const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
 		const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
 		setPercentUsed(percentUsed);
-	}, [fileMetadataMap]);
+	}, [fileMetadataList]);
 
 	return (
 		<div className="relative w-full max-w-xs">
@@ -466,39 +442,40 @@ export function FileListCard({
 				<CardContent className="flex-1 p-0">
 					<ScrollArea className="h-[calc(100vh-10rem)]">
 						<div className="p-4">
-							{isLoading ? (
-								<div className="grid gap-4">
-									{Array.from({ length: 5 }).map(
-										(_, index) => (
-											<Skeleton
-												key={index}
-												className="h-16 w-full rounded-lg"
+							<div className="grid gap-4">
+								{isLoading ? (
+									<>
+										{Array.from({ length: 5 }).map(
+											(_, index) => (
+												<Skeleton
+													key={index}
+													className="h-16 w-full rounded-lg"
+												/>
+											)
+										)}
+									</>
+								) : fileMetadataList?.length === 0 ? (
+									<div className="p-4 text-center text-muted-foreground text-sm w-full">
+										No files uploaded yet
+									</div>
+								) : (
+									<>
+										{fileMetadataList?.map((item) => (
+											<AttachmentItem
+												key={item.id}
+												item={item}
+												isActive={
+													selectedFile?.id === item.id
+												}
+												onDelete={handleFileDelete}
+												uploadStatusMap={
+													uploadStatusMap
+												}
 											/>
-										)
-									)}
-								</div>
-							) : Array.from(fileMetadataMap?.values() || [])
-									.length === 0 ? (
-								<div className="p-4 text-center text-muted-foreground text-sm w-full">
-									No files uploaded yet
-								</div>
-							) : (
-								<div className="grid gap-4">
-									{Array.from(
-										fileMetadataMap?.values() || []
-									).map((item) => (
-										<AttachmentItem
-											key={item.id}
-											item={item}
-											isActive={
-												selectedFile?.id === item.id
-											}
-											onDelete={handleFileDelete}
-											uploadStatusMap={uploadStatusMap}
-										/>
-									))}
-								</div>
-							)}
+										))}
+									</>
+								)}
+							</div>
 						</div>
 					</ScrollArea>
 				</CardContent>
