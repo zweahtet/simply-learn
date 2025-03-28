@@ -1,6 +1,6 @@
 // simply-learn/client/src/components/file-list.tsx
 "use client";
-import React from "react";
+import {useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
@@ -33,14 +33,12 @@ import {
 	EllipsisVertical,
 	Trash,
 } from "lucide-react";
+import { SupabaseConfig } from "@/lib/defaults";
 
 const supabase = createClient();
 
 interface FileListCardProps {
 	fileMetadataMap: Map<string, FileMetadata>;
-	setFileMetadataMap: React.Dispatch<
-		React.SetStateAction<Map<string, FileMetadata>>
-	>;
 	selectedFile: FileMetadata | null;
 	onFileSelect: (file: FileMetadata | null) => void;
 }
@@ -54,18 +52,18 @@ type FileUploadStatus =
 
 export function FileListCard({
 	fileMetadataMap,
-	setFileMetadataMap,
 	onFileSelect,
 	selectedFile,
 }: FileListCardProps) {
 	const { user } = useAuth();
-	const fileInputRef = React.useRef<HTMLInputElement>(null);
-	const [uploadStatusMap, setUploadStatusMap] = React.useState<
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const [uploadStatusMap, setUploadStatusMap] = useState<
 		Map<string, FileUploadStatus>
-	>(new Map<string, undefined>());
+		>(new Map<string, undefined>());
+	const [percentUsed, setPercentUsed] = useState<number>(0);
 
 	// can we memoize this function?
-	const generateFileId = React.useCallback(
+	const generateFileId = useCallback(
 		(fileName: string, fileSize: number): string => {
 			// Combine filename and size for better uniqueness
 			const str = `${fileName}-${fileSize}`;
@@ -114,13 +112,6 @@ export function FileListCard({
 							);
 						}
 
-						// update ui
-						setFileMetadataMap((prevFiles) => {
-							const newMap = new Map(prevFiles);
-							newMap.delete(fileId);
-							return newMap;
-						});
-
 						if (selectedFile?.id === fileId) {
 							onFileSelect(null);
 						}
@@ -149,10 +140,9 @@ export function FileListCard({
 				return new Promise<{ id: string }>(async (resolve, reject) => {
 					try {
 						const filePath = `${user?.id}/${fileId}/${file.name}`;
-						const bucket = "attachments";
 						const supabaseSignedUploadUrlResponse =
 							await supabase.storage
-								.from(bucket)
+								.from(SupabaseConfig.ATTACHMENT_BUCKET)
 								.createSignedUploadUrl(filePath, {
 									upsert: true,
 								});
@@ -169,10 +159,15 @@ export function FileListCard({
 						const { token, path } =
 							supabaseSignedUploadUrlResponse.data;
 						const reponse = await supabase.storage
-							.from(bucket)
+							.from(SupabaseConfig.ATTACHMENT_BUCKET)
 							.uploadToSignedUrl(path, token, file, {
 								upsert: true,
 								contentType: file.type,
+								metadata: {
+									name: file.name,
+									size: file.size.toString(),
+									type: file.type,
+								},
 							});
 						if (reponse.error) {
 							reject(reponse.error);
@@ -241,38 +236,12 @@ export function FileListCard({
 			toUpload.set(fileId, file);
 		});
 
-		// update the state of the file metadata map for client-side rendering
-		Array.from(selectedFiles).forEach((file) => {
-			setFileMetadataMap((prevFiles) => {
-				const newMap = new Map(prevFiles);
-				// Generate a unique ID for the file
-				const fileId = generateFileId(file.name, file.size);
-
-				newMap.set(fileId, {
-					id: fileId,
-					name: file.name,
-					type: file.type,
-					size: file.size,
-				});
-				return newMap;
-			});
-		});
-
 		try {
 			// Upload files and get server responses
 			const results = await uploadFiles(toUpload);
 			console.log("Upload results:", results);
 		} catch (error) {
 			toast.error("Error uploading files");
-			setFileMetadataMap((prevFiles) => {
-				const newMap = new Map(prevFiles);
-				toUpload.forEach((_, fileId) => {
-					if (uploadStatusMap.get(fileId) === "error") {
-						newMap.delete(fileId);
-					}
-				});
-				return newMap;
-			});
 		} finally {
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
@@ -297,12 +266,16 @@ export function FileListCard({
 		);
 	};
 
-	const totalSize = Array.from(fileMetadataMap.values()).reduce(
-		(total, file) => total + file.size,
-		0
-	);
-	const totalSizeFormatted = formatFileSize(totalSize);
-	const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
+	useEffect(() => {
+		const totalSize = Array.from(fileMetadataMap.values()).reduce(
+			(total, file) => total + file.size,
+			0
+		);
+		// const totalSizeFormatted = formatFileSize(totalSize);
+		// const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
+		const percentUsed = (totalSize / (10 * 1024 * 1024)) * 100;
+		setPercentUsed(percentUsed);
+	}, [fileMetadataMap]);
 
 	return (
 		<div className="relative w-full max-w-xs">
@@ -334,7 +307,7 @@ export function FileListCard({
 					<ScrollArea className="h-[calc(100vh-10rem)]">
 						<div className="p-4">
 							<div className="grid gap-4">
-								{fileMetadataMap.size === 0 ? (
+								{Array.from(fileMetadataMap.values()).length === 0 ? (
 									<div className="p-4 text-center text-muted-foreground text-sm w-full">
 										No files uploaded yet
 									</div>
@@ -348,11 +321,6 @@ export function FileListCard({
 													selectedFile?.id ===
 														item.id && "bg-muted"
 												)}
-												// onClick={() => {
-												// 	if (item.status === "ready") {
-												// 		onFileSelect(item);
-												// 	}
-												// }}
 												onClick={() =>
 													onFileSelect(item)
 												}
