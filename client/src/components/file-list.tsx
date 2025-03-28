@@ -81,17 +81,56 @@ export function FileListCard({
 	);
 
 	const handleFileDelete = (fileId: string) => {
-		setFileMetadataMap((prevFiles) => {
-			const newMap = new Map(prevFiles);
-			newMap.delete(fileId);
-			return newMap;
-		});
+		const bucket = "attachments";
+		const folderPath = `${user?.id}/${fileId}`;
 
-		if (selectedFile?.id === fileId) {
-			onFileSelect(null);
-		}
+		// list all files in the folder
+		supabase.storage
+			.from(bucket)
+			.list(folderPath)
+			.then((listResponse) => {
+				if (listResponse.error) {
+					console.error("Error listing files:", listResponse.error);
+				}
 
-		// TODO: invoke the file delete API here
+				if (!listResponse.data) {
+					return;
+				}
+
+				// create array of file paths to delete
+				const filesToDelete = listResponse.data.map(
+					(file) => `${folderPath}/${file.name}`
+				);
+
+				// delete all files in the folder
+				supabase.storage
+					.from(bucket)
+					.remove(filesToDelete)
+					.then((deleteResponse) => {
+						if (deleteResponse.error) {
+							console.error(
+								"Error deleting files:",
+								deleteResponse.error
+							);
+						}
+
+						// update ui
+						setFileMetadataMap((prevFiles) => {
+							const newMap = new Map(prevFiles);
+							newMap.delete(fileId);
+							return newMap;
+						});
+
+						if (selectedFile?.id === fileId) {
+							onFileSelect(null);
+						}
+						toast.success("File deleted successfully");
+					});
+			})
+			.catch((error) => {
+				console.error("Error when deleting file:", error);
+				toast.error("Something went wrong while deleting the file");
+			});
 	};
 
 	const uploadFiles = async (toUpload: Map<string, File>) => {
@@ -305,7 +344,7 @@ export function FileListCard({
 											<div
 												key={item.id}
 												className={cn(
-													"rounded-lg border bg-card p-4 shadow-sm transition-all hover:shadow-md relative overflow-hidden",
+													"rounded-lg border bg-card p-4 transition-all hover:shadow-md relative overflow-hidden",
 													selectedFile?.id ===
 														item.id && "bg-muted"
 												)}
