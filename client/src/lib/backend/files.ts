@@ -7,9 +7,9 @@ const supabase = createClient();
  * Helper function to call the Supabase API to get the list of files in the bucket.
  * @returns {Promise<FileMetadata[]>} - A promise that resolves to an array of file metadata objects.
  */
-export async function getFiles(userId: string): Promise<Map<string, FileMetadata>> {
+export async function getFiles(userId: string): Promise<Array<FileMetadata>> {
     // list all folders under the userId directory in the bucket
-    const { data, error } = await supabase.storage
+    const { data: dirs, error } = await supabase.storage
         .from(SupabaseConfig.ATTACHMENT_BUCKET)
         .list(userId);
     
@@ -17,14 +17,14 @@ export async function getFiles(userId: string): Promise<Map<string, FileMetadata
         throw new Error(error.message);
     }
 
-    if (!data) return new Map<string, FileMetadata>();
+    if (!dirs) return new Array<FileMetadata>();
 
     // filter out .emptyFolderPlaceholder
-    const filteredData = data.filter(
+    const filteredData = dirs.filter(
         (folder) => folder.name !== ".emptyFolderPlaceholder"
     );
 
-    const fileMetadataMap = new Map<string, FileMetadata>();
+    const fileMetadataList = new Array<FileMetadata>();
     for (const folder of filteredData) {
         // get the content inside the folder
         const { data, error } = await supabase.storage
@@ -40,15 +40,21 @@ export async function getFiles(userId: string): Promise<Map<string, FileMetadata
         // there should be only one pdf file and we will use that to display the file
         const pdfFile = data.find((file) => file.name.endsWith(".pdf"));
         if (pdfFile) {
-            fileMetadataMap.set(folder.name, {
+            fileMetadataList.push({
                 id: folder.name,
                 name: pdfFile.name,
                 type: pdfFile.metadata.mimetype,
                 size: pdfFile.metadata.size,
+                createdAt: pdfFile.created_at,
             });
         }
+
+        // ordered by the created_at date ascending
+        fileMetadataList.sort((a, b) => {
+            return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
     }
-    return fileMetadataMap;
+    return fileMetadataList;
 }
 
 /**
@@ -79,6 +85,38 @@ export async function deleteFile(userId: string, fileId: string) {
 /**
  * Helper function to call the Supabase API to upload a file to the bucket.
  */
-export async function uploadFile() {
+export async function uploadFile(userId: string, file: File, fileId: string): Promise<FileMetadata> {
+    const filePath = `${userId}/${fileId}/${file.name}`;
+    const { data: createSignedUrlData, error: createSignedUrlError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).createSignedUploadUrl(filePath, {
+        upsert: true,
+    });
 
+    if (createSignedUrlError) {
+        throw new Error(createSignedUrlError.message);
+    }
+    if (!createSignedUrlData) throw new Error("Failed to create signed URL");
+
+    const { token, path } = createSignedUrlData;
+    const { error: uploadError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, {
+        upsert: true,
+        contentType: file.type,
+        metadata: {
+            name: file.name,
+            size: file.size.toString(),
+            type: file.type,
+            createdBy: userId,
+        },
+    });
+
+    if (uploadError) {
+        throw new Error(uploadError.message);
+    }
+
+    return {
+        id: fileId,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        createdAt: new Date().toISOString(),
+    };
 }

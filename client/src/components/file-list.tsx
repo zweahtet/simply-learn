@@ -231,10 +231,6 @@ export function FileListCard({
 		revalidateIfStale: false,
 	});
 
-	// useEffect(() => {
-	// 	mutate();
-	// }, [fileMetadataList, mutate]);
-
 	// can we memoize this function?
 	const generateFileId = useCallback(
 		(fileName: string, fileSize: number): string => {
@@ -328,6 +324,7 @@ export function FileListCard({
 						name: file.name,
 						type: file.type,
 						size: file.size,
+						createdAt: new Date().toISOString(),
 					})),
 				];
 			}
