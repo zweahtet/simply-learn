@@ -2,9 +2,17 @@
 export interface FileMetadata {
     id: string;
     name: string;
-    type: "pdf" | "text";
+    type: string;
     size: number;
-    totalPages: number;
+    createdAt: string;
+    // totalPages: number;
+    // keywords: string[];
+    // topics: string[];
+}
+
+export interface FileUploadProgress {
+    fileId: string;
+    progress: number;
     status: "processing" | "ready" | "error";
 }
 
@@ -47,4 +55,13 @@ export interface AssessmentResultsSummary {
     languageLevel: string;
     cognitiveProfile: CognitiveProfile;
     overallScore: number;
+}
+
+/**
+ * Document Summary 
+ */
+export interface DocumentSummary {
+    summary: string;
+    keywords?: string[];
+    topics?: string[];
 }
