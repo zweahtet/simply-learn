@@ -167,6 +167,7 @@ export function FileListCard({
 									name: file.name,
 									size: file.size.toString(),
 									type: file.type,
+									createdBy: user?.id,
 								},
 							});
 						if (reponse.error) {
