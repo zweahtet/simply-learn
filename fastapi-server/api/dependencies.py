@@ -102,7 +102,6 @@ async def get_auth_context(
         refresh_token=None,
     )
 
-    # return user_rsp.user
     return AuthContext(
         user=user_rsp.user,
         supabase=supabase_client,

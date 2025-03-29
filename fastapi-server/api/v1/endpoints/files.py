@@ -179,6 +179,8 @@ async def summarize_file(
     current_user = auth_context.user
     supabase_client = auth_context.supabase
 
+    logger.info(f"User ID type: {type(current_user.id)}, Value: {current_user.id}")
+
     # Check if the file has been processed
     status_key = f"file:status:{current_user.id}:{file_id}"
     file_status = redis_client.get(status_key)
@@ -234,7 +236,7 @@ async def summarize_file(
             )
 
             # Process the pages
-            logger.info(f"Processing #{len(page_docs)} pages for summarization")
+            logger.info(f"Processing {len(page_docs)} pages for summarization")
             summary = summarizer.process_pages(pages=page_docs)
 
             # Create the summary data
@@ -257,14 +259,13 @@ async def summarize_file(
             logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
             upload_summary_response = await supabase_client.storage.from_(
                 "attachments"
-            ).upload_to_signed_url(
+            ).upload(
                 path=path,
                 token=token,
                 file=json.dumps(summary_data).encode("utf-8"),
                 file_options={
                     "upsert": "true",
                     "content-type": "application/json",
-                    "x-upsert": "true",
                 },
             )
             if upload_summary_response.path is None:
