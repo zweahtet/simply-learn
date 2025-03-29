@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Groq
     GROQ_API_KEY: str
 
+    # Supabase
+    SUPABASE_URL: str
+    SUPABASE_ANON_KEY: str
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -2,7 +2,8 @@
 import logging
 import redis
 from core.config import settings
-from typing import Annotated
+from pydantic import BaseModel, ConfigDict
+from typing import Annotated, ClassVar
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -28,28 +29,20 @@ def get_redis_client():
 
 RedisDep = Annotated[redis.Redis, Depends(get_redis_client)]
 
+# Security dependency injection
+security_scheme = HTTPBearer(
+    auto_error=False,
+)
+AuthDep = Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)]
 
-# User dependency injection
-# def get_current_user():
-#     """Dependency function to retrieve the current user from supabase"""
-#     # In a real application, this would extract the user from the request context
-#     # Here we return a dummy user for demonstration purposes
-#     profile = CognitiveProfile(
-#         memory=3, attention=2, language=2, visuospatial=4, executive=4
-#     )
-
-#     return UserInDB(id="dummy_user_id", cognitive_profile=profile)
-
-
-# CurrentActiveUserDep = Annotated[UserInDB, Depends(get_current_user)]
 
 # Supabase dependency injection
 # https://supabase.com/docs/reference/python/select
 async def get_supabase_async_client() -> AsyncClient:
     """for validation access_token init at life span event"""
     supabase_client = await create_async_client(
-        settings.SUPABASE_URL,
-        settings.SUPABASE_ANON_KEY,
+        supabase_url=settings.SUPABASE_URL,
+        supabase_key=settings.SUPABASE_ANON_KEY,
         options=AsyncClientOptions(
             auto_refresh_token=True,
         ),
@@ -66,16 +59,23 @@ async def get_supabase_async_client() -> AsyncClient:
 
 SupabaseAsyncClientDep = Annotated[AsyncClient, Depends(get_supabase_async_client)]
 
-# Security dependency injection
-security_scheme = HTTPBearer(
-    auto_error=False,
-)
-AuthDep = Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)]
 
-async def get_current_user(
+class AuthContext(BaseModel):
+    user: User
+    supabase: AsyncClient
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="forbid",
+        populate_by_name=True,
+        from_attributes=True,
+    )
+
+
+async def get_auth_context(
     authorization: AuthDep,
     supabase_client: SupabaseAsyncClientDep,
-):
+) -> AuthContext:
     """Get current user from access_token and validate it with supabase"""
     if not authorization:
         raise HTTPException(
@@ -97,6 +97,16 @@ async def get_current_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    return user_rsp.user
+    supabase_client.auth.set_session(
+        access_token=authorization.credentials,
+        refresh_token=None,
+    )
 
-CurrentActiveUserDep = Annotated[User, Depends(get_current_user)]
+    # return user_rsp.user
+    return AuthContext(
+        user=user_rsp.user,
+        supabase=supabase_client,
+    )
+
+
+CurrentAuthContext = Annotated[AuthContext, Depends(get_auth_context)]
