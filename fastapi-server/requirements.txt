@@ -11,3 +11,6 @@ huggingface_hub
 groq 
 transformers
 llama-index-core
+supabase
+python-json-logger
+platformdirs
