@@ -7,6 +7,7 @@ import json
 import pymupdf
 import pymupdf4llm
 import re
+import logging
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union, List, Dict, Any, Annotated
@@ -18,8 +19,11 @@ from services.summarize import DocumentSummarizer
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from schemas import BaseRequest, BaseResponse
-from api.dependencies import RedisDep, CurrentActiveUserDep, SupabaseAsyncClientDep
+from api.dependencies import RedisDep, CurrentAuthContext, SupabaseAsyncClientDep
 
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI router
 router = APIRouter()
 
 # Constants
@@ -47,16 +51,17 @@ class FileUploadResponse(BaseResponse):
     )
 
 
-@router.post("/upload")
-async def upload_file(
+@router.post("/{file_id}/process")
+async def process_file(
     background_tasks: BackgroundTasks,
     redis_client: RedisDep,
-    supabase_client: SupabaseAsyncClientDep,
-    current_user: CurrentActiveUserDep,
-    file_id: Annotated[str, Form(...)],
+    auth_context: CurrentAuthContext,
+    file_id: str,
     file: Annotated[UploadFile, File(...)],
 ):
-    """Process an uploaded PDF file and extract content"""   
+    """Process an uploaded PDF file and extract content"""
+    current_user = auth_context.user
+
     try:
         # Senatize file name
         # filename: str = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
@@ -81,26 +86,12 @@ async def upload_file(
         with open(file_path, "wb") as f:
             f.write(await file.read())
 
-        # Store the file in Supabase storage
-        supabase_upload_response = await supabase_client.storage.from_(
-            "attachments"
-        ).upload(
-            path=f"attachments/{current_user.id}/{file_id}/{filename}",
-            file=file_path,
-        )
-
-        if supabase_upload_response.path is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload file to Supabase",
-            )
-
         # Set initial status in Redis
-        status_key = f"summarization:status:{current_user.id}:{file_id}"
+        status_key = f"file:status:{current_user.id}:{file_id}"
         redis_client.set(status_key, "pending")
 
-        # Define background task that handles all processing
-        async def process_file():
+        # Define background task that handles processing
+        async def process_file_task():
             try:
                 # update status to processing
                 redis_client.set(status_key, "processing")
@@ -111,65 +102,37 @@ async def upload_file(
                 # extract text from the PDF file
                 reader = PDFMarkdownReader()
                 page_docs = reader.load_data(
-                    file_path, image_path, {"user_id": current_user.id}
+                    file_path,
+                    image_path,
+                    {"user_id": current_user.id, "file_id": file_id},
                 )
+
+                # TODO: store the images in Supabase
 
                 # Store documents in vector database
                 attachment_vs = AttachmentVectorSpace()
                 ids = attachment_vs.store_documents_in_vector_db(page_docs)
 
-                # set status as "summarizing" in Redis
-                redis_client.set(status_key, "summarizing")
+                # set status as "processed" in Redis
+                redis_client.set(status_key, "processed")
 
-                # Create the summarizer
-                summarizer = DocumentSummarizer(
-                    user_id=current_user.id,
-                    file_id=file_id,
-                    verbose=True,
+                # Store metadata in Redis for later use by summarization
+                meta_key = f"file:metadata:{current_user.id}:{file_id}"
+                redis_client.set(
+                    meta_key,
+                    json.dumps(
+                        {
+                            "filename": filename,
+                            "path": str(file_path),
+                            "image_path": str(image_path),
+                            "created_at": datetime.now().isoformat(),
+                        }
+                    ),
                 )
-
-                # Process the pages
-                summary = summarizer.process_pages(pages=page_docs)
-
-                # Store as a file in the same directory structure
-                summary_file_path = temp_file_dir / "summary.json"
-
-                # Ensure directory exists
-                os.makedirs(os.path.dirname(summary_file_path), exist_ok=True)
-
-                # Create the summary data
-                summary_data = {
-                    "file_id": file_id,
-                    "summary": summary,
-                    "completed_at": datetime.now().isoformat(),
-                }
-
-                # Store the summary in Supabase
-                supabase_summary_response = await supabase_client.storage.from_(
-                    "attachments"
-                ).upload(
-                    path=f"attachments/{current_user.id}/{file_id}/summary.json",
-                    file=json.dumps(summary_data).encode("utf-8"),
-                )
-                if supabase_summary_response.path is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to upload summary to Supabase",
-                    )
-
-                # Update status in Redis to "completed"
-                redis_client.set(status_key, "completed")
-
-                # Clean up the temporary files
-                os.unlink(file_path)
-                for image_file in image_path.glob("*"):
-                    os.unlink(image_file)
-                os.rmdir(image_path)
-                os.rmdir(temp_file_dir)
 
             except Exception as e:
                 # Log the error
-                print(f"Error in summarization task: {e}")
+                logger.error(f"Error in processing file task: {e}")
 
                 # Set status to "error" in Redis
                 redis_client.set(status_key, "error")
@@ -179,15 +142,15 @@ async def upload_file(
                     error_file_path = temp_file_dir / "summary_error.json"
                     error_data = {
                         "error": str(e),
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
                     with open(error_file_path, "w", encoding="utf-8") as f:
                         json.dump(error_data, f, ensure_ascii=False, indent=2)
                 except Exception as write_error:
-                    print(f"Error writing error file: {write_error}")
+                    logger.error(f"Error writing error file: {write_error}")
 
         # Run the summarization in the background
-        background_tasks.add_task(process_file)
+        background_tasks.add_task(process_file_task)
         return JSONResponse(
             content={
                 "id": file_id,
@@ -205,13 +168,159 @@ async def upload_file(
         )
 
 
+@router.post("/{file_id}/summarize")
+async def summarize_file(
+    background_tasks: BackgroundTasks,
+    redis_client: RedisDep,
+    auth_context: CurrentAuthContext,
+    file_id: str,
+):
+    """Generate a summary for a previously processed file"""
+    current_user = auth_context.user
+    supabase_client = auth_context.supabase
+
+    # Check if the file has been processed
+    status_key = f"file:status:{current_user.id}:{file_id}"
+    file_status = redis_client.get(status_key)
+
+    if not file_status or file_status == "error":
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": "File not found or processing failed. Process the file first.",
+            },
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    if file_status in ["pending", "processing"]:
+        return JSONResponse(
+            content={
+                "status": "pending",
+                "message": "File is still being processed. Try again when processing is complete.",
+            },
+            status_code=status.HTTP_409_CONFLICT,
+        )
+
+    # Set up summarization status
+    summary_status_key = f"summarization:status:{current_user.id}:{file_id}"
+    redis_client.set(summary_status_key, "pending")
+
+    # Define background task for summarization
+    async def summarize_content():
+        try:
+            # Update status
+            redis_client.set(summary_status_key, "summarizing")
+
+            # Get file metadata
+            meta_key = f"file:metadata:{current_user.id}:{file_id}"
+            metadata = json.loads(redis_client.get(meta_key) or "{}")
+
+            if not metadata:
+                raise Exception("File metadata not found")
+
+            # Retrieve documents from vector store
+            logger.info(f"Retrieving documents for file ID: {file_id}")
+            attachment_vs = AttachmentVectorSpace()
+            page_docs = attachment_vs.get_documents_by_file_id(file_id)
+
+            if not page_docs:
+                raise Exception("No document content found in vector store")
+
+            # Create the summarizer
+            summarizer = DocumentSummarizer(
+                user_id=current_user.id,
+                file_id=file_id,
+                verbose=True,
+            )
+
+            # Process the pages
+            logger.info(f"Processing #{len(page_docs)} pages for summarization")
+            summary = summarizer.process_pages(pages=page_docs)
+
+            # Create the summary data
+            summary_data = {
+                "file_id": file_id,
+                "summary": summary,
+                "created_at": datetime.now().isoformat(),
+            }
+
+            # Store the summary in Supabase
+            logger.info(
+                f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
+            )
+            _, _, token, path = await supabase_client.storage.from_(
+                "attachments"
+            ).create_signed_upload_url(
+                path=f"{current_user.id}/{file_id}/summary.json",
+            )
+            logger.info(f"Supabase Signed Upload Token created.")
+            logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
+            upload_summary_response = await supabase_client.storage.from_(
+                "attachments"
+            ).upload_to_signed_url(
+                path=path,
+                token=token,
+                file=json.dumps(summary_data).encode("utf-8"),
+                file_options={
+                    "upsert": "true",
+                    "content-type": "application/json",
+                    "x-upsert": "true",
+                },
+            )
+            if upload_summary_response.path is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to upload summary to Supabase",
+                )
+
+            # Update status in Redis to "completed"
+            logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
+            redis_client.set(summary_status_key, "completed")
+
+            logger.info(f"Successfully summarized file ID: {file_id}")
+        except Exception as e:
+            # Log the error
+            logger.error(f"Error in summarization task: {e}")
+
+            # Set status to "error" in Redis
+            redis_client.set(summary_status_key, "error")
+
+            # Save error details
+            try:
+                temp_file_dir = pathlib.Path(
+                    f"{TEMP_FILE_DIR}/{current_user.id}/{file_id}"
+                )
+                error_file_path = temp_file_dir / "summary_error.json"
+                os.makedirs(os.path.dirname(error_file_path), exist_ok=True)
+                error_data = {"error": str(e), "timestamp": datetime.now().isoformat()}
+                with open(error_file_path, "w", encoding="utf-8") as f:
+                    json.dump(error_data, f, ensure_ascii=False, indent=2)
+            except Exception as write_error:
+                logger.error(f"Error writing error file: {write_error}")
+
+    # Run the summarization in the background
+    logger.info(f"Starting background summarization task for file ID: {file_id}")
+    background_tasks.add_task(summarize_content)
+    return JSONResponse(
+        content={
+            "id": file_id,
+            "status": "pending",
+            "message": "Summarization started",
+        },
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+
 @router.get("/{file_id}/summary", description="Get the summary of a file")
 async def get_summary(
     file_id: str,
     redis_client: RedisDep,
-    current_user: CurrentActiveUserDep,
-    supabase_client: SupabaseAsyncClientDep,
+    auth_context: CurrentAuthContext,
 ):
+    """Get the summary of a file"""
+    current_user = auth_context.user
+    supabase_client = auth_context.supabase
+
     # Check status in Redis
     status_key = f"summarization:status:{current_user.id}:{file_id}"
     task_status = redis_client.get(status_key)
@@ -245,12 +354,15 @@ async def get_summary(
 
     # If completed, return the summary
     elif task_status == "completed":
-        # First try to read from local file if it exists
-        if summary_file_path.exists():
-            try:
-                with open(summary_file_path, "r") as f:
-                    summary_data = json.load(f)
+        try:
+            # Try to get the file from Supabase storage
+            file_path = f"{current_user.id}/{file_id}/summary.json"
+            summary_bytes = await supabase_client.storage.from_("attachments").download(
+                file_path
+            )
 
+            if summary_bytes:
+                summary_data = json.loads(summary_bytes.decode("utf-8"))
                 return JSONResponse(
                     content={
                         "status": "completed",
@@ -260,50 +372,28 @@ async def get_summary(
                     },
                     status_code=status.HTTP_200_OK,
                 )
-            except (FileNotFoundError, json.JSONDecodeError) as e:
-                # If local file read fails, try fetching from Supabase
-                pass
 
-        # If we have Supabase client and local file doesn't exist or couldn't be read
-        if supabase_client:
-            try:
-                # Try to get the file from Supabase storage
-                file_path = f"attachments/{current_user.id}/{file_id}/summary.json"
-                summary_bytes = await supabase_client.storage.from_(
-                    "attachments"
-                ).download(file_path)
-
-                if summary_bytes:
-                    summary_data = json.loads(summary_bytes.decode("utf-8"))
-                    return JSONResponse(
-                        content={
-                            "status": "completed",
-                            "fileId": file_id,
-                            "summary": summary_data["summary"],
-                            "completedAt": summary_data["completed_at"],
-                        },
-                        status_code=status.HTTP_200_OK,
-                    )
-            except Exception as e:
-                return JSONResponse(
-                    content={
-                        "status": "error",
-                        "message": f"Error retrieving summary file: {str(e)}",
-                    },
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-        # If we get here, the summary couldn't be found
-        return JSONResponse(
-            content={
-                "status": "error",
-                "message": "Summary is marked as completed, but file could not be found",
-            },
-            status_code=status.HTTP_404_NOT_FOUND,
-        )
+            # the summary couldn't be found
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Summary is marked as completed, but file could not be found",
+                },
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as e:
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": f"Error retrieving summary file: {str(e)}",
+                },
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     # If there was an error
     elif task_status == "error":
+        # log the error
+        logger.error(f"Error getting summary for file ID: {file_id} - {task_status}")
         error_file_path = temp_file_dir / "summary_error.json"
         error_message = "Unknown error occurred during processing"
 
