@@ -1,15 +1,16 @@
-import { createClient } from "@/lib/supabase/client";
+import { supabaseClient } from "@/lib/supabase/client";
 import { SupabaseConfig } from "@/lib/defaults";
-import { FileMetadata } from "@/types";
-const supabase = createClient();
+import { DocumentSummary, FileMetadata } from "@/types";
+import { restClient } from "@/lib/backend/index";
 
 /**
  * Helper function to call the Supabase API to get the list of files in the bucket.
+ * @param {string} userId - The user ID to get files for.
  * @returns {Promise<FileMetadata[]>} - A promise that resolves to an array of file metadata objects.
  */
 export async function getFiles(userId: string): Promise<Array<FileMetadata>> {
     // list all folders under the userId directory in the bucket
-    const { data: dirs, error } = await supabase.storage
+    const { data: dirs, error } = await supabaseClient.storage
         .from(SupabaseConfig.ATTACHMENT_BUCKET)
         .list(userId);
     
@@ -27,7 +28,7 @@ export async function getFiles(userId: string): Promise<Array<FileMetadata>> {
     const fileMetadataList = new Array<FileMetadata>();
     for (const folder of filteredData) {
         // get the content inside the folder
-        const { data, error } = await supabase.storage
+        const { data, error } = await supabaseClient.storage
             .from(SupabaseConfig.ATTACHMENT_BUCKET)
             .list(`${userId}/${folder.name}`);
 
@@ -59,11 +60,13 @@ export async function getFiles(userId: string): Promise<Array<FileMetadata>> {
 
 /**
  * Helper function to call the Supabase API to delete a file from the bucket.
+ * @param {string} userId - The user ID to delete files for.
+ * @param {string} fileId - The file ID to delete.
  */
 export async function deleteFile(userId: string, fileId: string) {
     // list all files in the folder
     const folderPath = `${userId}/${fileId}`;
-    const { data, error: listError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).list(folderPath);
+    const { data, error: listError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).list(folderPath);
     
     if (listError) {
         throw new Error(listError.message);
@@ -75,7 +78,7 @@ export async function deleteFile(userId: string, fileId: string) {
     const filesToDelete = data.map((file) => `${folderPath}/${file.name}`);
 
     // delete all files in the folder
-    const { error: deleteError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).remove(filesToDelete);
+    const { error: deleteError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).remove(filesToDelete);
 
     if (deleteError) {
         throw new Error(deleteError.message);
@@ -84,10 +87,13 @@ export async function deleteFile(userId: string, fileId: string) {
 
 /**
  * Helper function to call the Supabase API to upload a file to the bucket.
+ * @param {string} userId - The user ID to upload files for.
+ * @param {File} file - The file to upload.
+ * @param {string} fileId - The file ID to upload.
  */
 export async function uploadFile(userId: string, file: File, fileId: string): Promise<FileMetadata> {
     const filePath = `${userId}/${fileId}/${file.name}`;
-    const { data: createSignedUrlData, error: createSignedUrlError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).createSignedUploadUrl(filePath, {
+    const { data: createSignedUrlData, error: createSignedUrlError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).createSignedUploadUrl(filePath, {
         upsert: true,
     });
 
@@ -97,7 +103,7 @@ export async function uploadFile(userId: string, file: File, fileId: string): Pr
     if (!createSignedUrlData) throw new Error("Failed to create signed URL");
 
     const { token, path } = createSignedUrlData;
-    const { error: uploadError } = await supabase.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, {
+    const { error: uploadError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, {
         upsert: true,
         contentType: file.type,
         metadata: {
@@ -119,4 +125,17 @@ export async function uploadFile(userId: string, file: File, fileId: string): Pr
         size: file.size,
         createdAt: new Date().toISOString(),
     };
+}
+
+export async function processFile(fileId: string, file: File) {
+    return restClient.fetchWithAuth(`/files/${fileId}/process`)
+}
+
+/**
+ * Helper function to call the FastAPI backend to get the summary of a file.
+ * @param {string} fileId - The file ID to get the summary for.
+ * @returns 
+ */
+export async function getSummary(fileId: string): Promise<DocumentSummary> {
+    return restClient.fetchWithAuth(`/files/${fileId}/summary`)
 }
