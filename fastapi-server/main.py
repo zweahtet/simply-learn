@@ -19,7 +19,7 @@ logs_dir = Path("logs")
 logs_dir.mkdir(parents=True, exist_ok=True)
 
 # Load logging configuration
-logging.config.fileConfig("core/logging.conf")
+logging.config.fileConfig("core/logging.conf", disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
