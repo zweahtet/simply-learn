@@ -246,39 +246,51 @@ async def summarize_file(
                 "created_at": datetime.now().isoformat(),
             }
 
+            # FIXME: cannot store, getting 403 unauthorized rls error
             # Store the summary in Supabase
-            logger.info(
-                f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
-            )
-            _, _, token, path = await supabase_client.storage.from_(
-                "attachments"
-            ).create_signed_upload_url(
-                path=f"{current_user.id}/{file_id}/summary.json",
-            )
-            logger.info(f"Supabase Signed Upload Token created.")
-            logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
-            upload_summary_response = await supabase_client.storage.from_(
-                "attachments"
-            ).upload(
-                path=path,
-                token=token,
-                file=json.dumps(summary_data).encode("utf-8"),
-                file_options={
-                    "upsert": "true",
-                    "content-type": "application/json",
-                },
-            )
-            if upload_summary_response.path is None:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to upload summary to Supabase",
-                )
+            # logger.info(
+            #     f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
+            # )
+            # _, _, token, path = await supabase_client.storage.from_(
+            #     "attachments"
+            # ).create_signed_upload_url(
+            #     path=f"{current_user.id}/{file_id}/summary.json",
+            # )
+            # logger.info(f"Supabase Signed Upload Token created.")
+            # logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
+            # upload_summary_response = await supabase_client.storage.from_(
+            #     "attachments"
+            # ).upload(
+            #     path=path,
+            #     token=token,
+            #     file=json.dumps(summary_data).encode("utf-8"),
+            #     file_options={
+            #         "upsert": "true",
+            #         "content-type": "application/json",
+            #     },
+            # )
+            # if upload_summary_response.path is None:
+            #     raise HTTPException(
+            #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            #         detail="Failed to upload summary to Supabase",
+            #     )
+
+            # logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
 
             # Update status in Redis to "completed"
-            logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
             redis_client.set(summary_status_key, "completed")
 
             logger.info(f"Successfully summarized file ID: {file_id}")
+
+            # Save the summary locally
+            summary_file_path = pathlib.Path(
+                f"{TEMP_FILE_DIR}/{current_user.id}/{file_id}/summary.json"
+            )
+            os.makedirs(os.path.dirname(summary_file_path), exist_ok=True)
+            with open(summary_file_path, "w", encoding="utf-8") as f:
+                json.dump(summary_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Summary saved locally at: {summary_file_path}")
+
         except Exception as e:
             # Log the error
             logger.error(f"Error in summarization task: {e}")
@@ -320,7 +332,6 @@ async def get_summary(
 ):
     """Get the summary of a file"""
     current_user = auth_context.user
-    supabase_client = auth_context.supabase
 
     # Check status in Redis
     status_key = f"summarization:status:{current_user.id}:{file_id}"
@@ -333,8 +344,7 @@ async def get_summary(
         )
 
     # User directory where files are stored
-    temp_file_dir = pathlib.Path(f"{TEMP_FILE_DIR}/{current_user.id}/files/{file_id}")
-    summary_file_path = temp_file_dir / "summary.json"
+    temp_file_dir = pathlib.Path(f"{TEMP_FILE_DIR}/{current_user.id}/{file_id}")
 
     # Handle cases where processing is not yet complete
     if task_status in ["pending", "processing", "summarizing"]:
@@ -356,23 +366,20 @@ async def get_summary(
     # If completed, return the summary
     elif task_status == "completed":
         try:
-            # Try to get the file from Supabase storage
-            file_path = f"{current_user.id}/{file_id}/summary.json"
-            summary_bytes = await supabase_client.storage.from_("attachments").download(
-                file_path
-            )
-
-            if summary_bytes:
-                summary_data = json.loads(summary_bytes.decode("utf-8"))
-                return JSONResponse(
-                    content={
-                        "status": "completed",
-                        "fileId": file_id,
-                        "summary": summary_data["summary"],
-                        "completedAt": summary_data["completed_at"],
-                    },
-                    status_code=status.HTTP_200_OK,
-                )
+            # Try to get the summary from local directory
+            summary_file_path = temp_file_dir / "summary.json"
+            if summary_file_path.exists():
+                with open(summary_file_path, "r", encoding="utf-8") as f:
+                    summary_data = json.load(f)
+                    return JSONResponse(
+                        content={
+                            "status": "completed",
+                            "fileId": file_id,
+                            "summary": summary_data["summary"],
+                            "completedAt": summary_data["created_at"],
+                        },
+                        status_code=status.HTTP_200_OK,
+                    )
 
             # the summary couldn't be found
             return JSONResponse(
