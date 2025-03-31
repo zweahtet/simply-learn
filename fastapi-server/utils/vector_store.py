@@ -182,7 +182,7 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             print(f"Error retrieving documents: {e}")
             raise SystemError(f"Error retrieving documents: {e}")
 
-    def store_documents_in_vector_db(
+    def store_documents(
         self,
         documents: List[LlamaIndexDocument],
         batch_size: int = 5,
@@ -244,3 +244,39 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             del doc_chunks
             del doc_splitter
             del points
+
+    def get_documents_by_file_id(self, file_id: str) -> List[LlamaIndexDocument]:
+        """
+        Retrieve documents from the vector database based on the file ID.
+
+        Args:
+            file_id (str): The file ID to filter by.
+
+        Returns:
+            List of documents matching the file ID.
+        """
+        try:
+            # Perform the query
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="file_id",
+                            match=models.MatchValue(value=file_id),
+                        ),
+                    ]
+                ),
+            )
+
+            return [
+                LlamaIndexDocument(
+                    id=result.id,
+                    text=result.payload.get("document"),
+                    metadata=result.payload,
+                )
+                for result in response.points
+            ]
+        except Exception as e:
+            print(f"Error retrieving documents by file ID: {e}")
+            raise SystemError(f"Error retrieving documents by file ID: {e}")
