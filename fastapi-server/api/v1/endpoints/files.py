@@ -56,6 +56,7 @@ async def process_file(
     background_tasks: BackgroundTasks,
     redis_client: RedisDep,
     auth_context: CurrentAuthContext,
+    supabase_client: SupabaseAsyncClientDep,
     file_id: str,
     file: Annotated[UploadFile, File(...)],
 ):
@@ -77,58 +78,104 @@ async def process_file(
         os.makedirs(temp_file_dir, exist_ok=True)
 
         # Define file path
-        file_path = pathlib.Path(temp_file_dir / filename)
+        temp_file_path = pathlib.Path(temp_file_dir / filename)
 
         # Create directories if they don't exist
-        os.makedirs(file_path.parent, exist_ok=True)
+        # os.makedirs(file_path.parent, exist_ok=True)
 
         # Save the file in temporary directory
-        with open(file_path, "wb") as f:
+        # Save file using chunked reading to handle large files
+        # chunk_size = 1024 * 1024  # 1MB chunks
+        # with open(temp_file_path, "wb") as buffer:
+        #     while content := await file.read(chunk_size):
+        #         buffer.write(content)
+        # logger.info(f"File saved at: {temp_file_path}")
+
+        with open(temp_file_path, "wb") as f:
             f.write(await file.read())
 
         # Set initial status in Redis
         status_key = f"file:status:{current_user.id}:{file_id}"
-        redis_client.set(status_key, "pending")
+        redis_client.set(status_key, "pending", ex=CACHE_TTL)
 
         # Define background task that handles processing
         async def process_file_task():
             try:
                 # update status to processing
-                redis_client.set(status_key, "processing")
+                redis_client.set(status_key, "processing", ex=CACHE_TTL)
+                logger.info(f"Processing file: {file_id}")
 
                 # define image path
-                image_path = temp_file_dir / "images"
+                temp_image_dir = temp_file_dir / "images"
 
                 # extract text from the PDF file
+                logger.info(f"Extracting data from: {temp_file_path}")
                 reader = PDFMarkdownReader()
                 page_docs = reader.load_data(
-                    file_path,
-                    image_path,
+                    temp_file_path,
+                    temp_image_dir,
                     {"user_id": current_user.id, "file_id": file_id},
                 )
+                logger.info(f"Extracted {len(page_docs)} pages from file: {file_id}")
 
                 # TODO: store the images in Supabase
+                logger.info(
+                    f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
+                )
+
+                # Set the client's session with the user's access token
+                try:
+                    await supabase_client.auth.set_session(
+                        auth_context.access_token, refresh_token=""
+                    )
+                except Exception as e:
+                    logger.error(f"Error setting Supabase session: {e}")
+                    raise
+
+                # Upload images to Supabase from image directory
+                for image_file in os.listdir(temp_image_dir):
+                    temp_image_path = temp_image_dir / image_file
+                    if temp_image_path.is_file():
+                        # generate signed upload url and token for secure upload
+                        signed_upload_response = await supabase_client.storage.from_(
+                            "attachments"
+                        ).create_signed_upload_url(
+                            path=f"{current_user.id}/{file_id}/images/{image_file}",
+                        )
+
+                        logger.info(
+                            f"Uploading image {image_file} to Supabase Storage ..."
+                        )
+                        upload_response = await supabase_client.storage.from_(
+                            "attachments"
+                        ).upload_to_signed_url(
+                            path=signed_upload_response.get("path"),
+                            token=signed_upload_response.get("token"),
+                            file=temp_image_path,
+                            file_options={
+                                "upsert": "true",
+                                "content-type": "image/png",
+                            },
+                        )
+
+                        if upload_response.path is None:
+                            raise HTTPException(
+                                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail="Failed to upload image to Supabase",
+                            )
+
+                        logger.info("Image uploaded to Supabase storage")
 
                 # Store documents in vector database
+                logger.info(
+                    f"Storing documents in vector database for file: {file_id} ..."
+                )
                 attachment_vs = AttachmentVectorSpace()
-                ids = attachment_vs.store_documents_in_vector_db(page_docs)
+                _ = attachment_vs.store_documents(page_docs)
 
                 # set status as "processed" in Redis
-                redis_client.set(status_key, "processed")
-
-                # Store metadata in Redis for later use by summarization
-                meta_key = f"file:metadata:{current_user.id}:{file_id}"
-                redis_client.set(
-                    meta_key,
-                    json.dumps(
-                        {
-                            "filename": filename,
-                            "path": str(file_path),
-                            "image_path": str(image_path),
-                            "created_at": datetime.now().isoformat(),
-                        }
-                    ),
-                )
+                redis_client.set(status_key, "processed", ex=CACHE_TTL)
+                logger.info(f"Successfully processed file: {file_id}")
 
             except Exception as e:
                 # Log the error
@@ -137,20 +184,10 @@ async def process_file(
                 # Set status to "error" in Redis
                 redis_client.set(status_key, "error")
 
-                # Save error details to a file
-                try:
-                    error_file_path = temp_file_dir / "summary_error.json"
-                    error_data = {
-                        "error": str(e),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                    with open(error_file_path, "w", encoding="utf-8") as f:
-                        json.dump(error_data, f, ensure_ascii=False, indent=2)
-                except Exception as write_error:
-                    logger.error(f"Error writing error file: {write_error}")
-
         # Run the summarization in the background
         background_tasks.add_task(process_file_task)
+        logger.info(f"Background processing task started for file: {file_id}")
+
         return JSONResponse(
             content={
                 "id": file_id,
@@ -168,16 +205,53 @@ async def process_file(
         )
 
 
+class DocumentStatusResponse(BaseResponse):
+    """
+    Response schema for document processing status.
+    """
+
+    file_id: str = Field(description="Unique identifier for the file")
+    status: str = Field(description="Status of the document processing")
+    message: Optional[str] = Field(description="Additional message or error details")
+
+
+@router.get(
+    "/{file_id}/status",
+    description="Check the status of a file",
+    response_model=DocumentStatusResponse,
+)
+async def check_document_status(
+    file_id: str,
+    redis_client: RedisDep,
+    auth_context: CurrentAuthContext,
+):
+    """Check the status of a file processing task"""
+    current_user = auth_context.user
+
+    # Check status in Redis
+    status_key = f"file:status:{current_user.id}:{file_id}"
+    task_status = redis_client.get(status_key)
+
+    if task_status is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No processing found for file ID: {file_id}",
+        )
+
+    # Return the status
+    return {"file_id": file_id, "status": task_status, "message": None}
+
+
 @router.post("/{file_id}/summarize")
 async def summarize_file(
     background_tasks: BackgroundTasks,
     redis_client: RedisDep,
     auth_context: CurrentAuthContext,
+    supabase_client: SupabaseAsyncClientDep,
     file_id: str,
 ):
     """Generate a summary for a previously processed file"""
     current_user = auth_context.user
-    supabase_client = auth_context.supabase
 
     logger.info(f"User ID type: {type(current_user.id)}, Value: {current_user.id}")
 
@@ -213,13 +287,6 @@ async def summarize_file(
             # Update status
             redis_client.set(summary_status_key, "summarizing")
 
-            # Get file metadata
-            meta_key = f"file:metadata:{current_user.id}:{file_id}"
-            metadata = json.loads(redis_client.get(meta_key) or "{}")
-
-            if not metadata:
-                raise Exception("File metadata not found")
-
             # Retrieve documents from vector store
             logger.info(f"Retrieving documents for file ID: {file_id}")
             attachment_vs = AttachmentVectorSpace()
@@ -239,77 +306,55 @@ async def summarize_file(
             logger.info(f"Processing {len(page_docs)} pages for summarization")
             summary = summarizer.process_pages(pages=page_docs)
 
-            # Create the summary data
-            summary_data = {
-                "file_id": file_id,
-                "summary": summary,
-                "created_at": datetime.now().isoformat(),
-            }
-
             # FIXME: cannot store, getting 403 unauthorized rls error
             # Store the summary in Supabase
-            # logger.info(
-            #     f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
-            # )
-            # _, _, token, path = await supabase_client.storage.from_(
-            #     "attachments"
-            # ).create_signed_upload_url(
-            #     path=f"{current_user.id}/{file_id}/summary.json",
-            # )
-            # logger.info(f"Supabase Signed Upload Token created.")
-            # logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
-            # upload_summary_response = await supabase_client.storage.from_(
-            #     "attachments"
-            # ).upload(
-            #     path=path,
-            #     token=token,
-            #     file=json.dumps(summary_data).encode("utf-8"),
-            #     file_options={
-            #         "upsert": "true",
-            #         "content-type": "application/json",
-            #     },
-            # )
-            # if upload_summary_response.path is None:
-            #     raise HTTPException(
-            #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            #         detail="Failed to upload summary to Supabase",
-            #     )
+            logger.info(
+                f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
+            )
+            # Set the client's session with the user's access token
+            try:
+                await supabase_client.auth.set_session(
+                    auth_context.access_token, refresh_token=""
+                )
+            except Exception as e:
+                logger.error(f"Error setting Supabase session: {e}")
+                raise
 
-            # logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
+            # Generate signed upload URL and token for secure upload
+            signed_upload_response = await supabase_client.storage.from_(
+                "attachments"
+            ).create_signed_upload_url(
+                path=f"{current_user.id}/{file_id}/summary.json",
+            )
+
+            logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
+            upload_summary_response = await supabase_client.storage.from_(
+                "attachments"
+            ).upload_to_signed_url(
+                path=signed_upload_response.get("path"),
+                token=signed_upload_response.get("token"),
+                file=summary,
+                file_options={
+                    "upsert": "true",
+                    "content-type": "application/json",
+                },
+            )
+            if upload_summary_response.path is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to upload summary to Supabase",
+                )
+            logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
 
             # Update status in Redis to "completed"
             redis_client.set(summary_status_key, "completed")
-
             logger.info(f"Successfully summarized file ID: {file_id}")
-
-            # Save the summary locally
-            summary_file_path = pathlib.Path(
-                f"{TEMP_FILE_DIR}/{current_user.id}/{file_id}/summary.json"
-            )
-            os.makedirs(os.path.dirname(summary_file_path), exist_ok=True)
-            with open(summary_file_path, "w", encoding="utf-8") as f:
-                json.dump(summary_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Summary saved locally at: {summary_file_path}")
-
         except Exception as e:
             # Log the error
             logger.error(f"Error in summarization task: {e}")
 
             # Set status to "error" in Redis
             redis_client.set(summary_status_key, "error")
-
-            # Save error details
-            try:
-                temp_file_dir = pathlib.Path(
-                    f"{TEMP_FILE_DIR}/{current_user.id}/{file_id}"
-                )
-                error_file_path = temp_file_dir / "summary_error.json"
-                os.makedirs(os.path.dirname(error_file_path), exist_ok=True)
-                error_data = {"error": str(e), "timestamp": datetime.now().isoformat()}
-                with open(error_file_path, "w", encoding="utf-8") as f:
-                    json.dump(error_data, f, ensure_ascii=False, indent=2)
-            except Exception as write_error:
-                logger.error(f"Error writing error file: {write_error}")
 
     # Run the summarization in the background
     logger.info(f"Starting background summarization task for file ID: {file_id}")

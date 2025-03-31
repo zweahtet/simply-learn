@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from schemas import UserInDB, CognitiveProfile
-from gotrue.types import User
+from gotrue.types import AuthResponse, User, Session
 from supabase.client import AsyncClient, create_async_client, AsyncClientOptions
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ SupabaseAsyncClientDep = Annotated[AsyncClient, Depends(get_supabase_async_clien
 
 class AuthContext(BaseModel):
     user: User
-    supabase: AsyncClient
+    access_token: str
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
         arbitrary_types_allowed=True,
@@ -97,14 +97,9 @@ async def get_auth_context(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    supabase_client.auth.set_session(
-        access_token=authorization.credentials,
-        refresh_token=None,
-    )
-
     return AuthContext(
         user=user_rsp.user,
-        supabase=supabase_client,
+        access_token=authorization.credentials,
     )
 
 
