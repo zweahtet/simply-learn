@@ -90,15 +90,23 @@ async def get_auth_context(
         )
 
     # Verify jwt using supabase
-    user_rsp = await supabase_client.auth.get_user(jwt=authorization.credentials)
-    if not user_rsp:
+    try:
+        user_auth_response = await supabase_client.auth.get_user(jwt=authorization.credentials)
+    except Exception as e:
+        logger.error(f"Error verifying JWT: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+    
+    if not user_auth_response:
         logger.error("User not found")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     return AuthContext(
-        user=user_rsp.user,
+        user=user_auth_response.user,
         access_token=authorization.credentials,
     )
 
