@@ -11,6 +11,12 @@ services:
     env_file: 
       - ./fastapi-server/.env
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://0.0.0.0:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     depends_on:
       - redis
 
@@ -27,6 +33,10 @@ services:
       retries: 3
     command: redis-server --save 60 1 --loglevel warning
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   celery_worker:
     build:
@@ -41,6 +51,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      web:
+        condition: service_healthy
 
   celery_beat:
     build:
@@ -53,6 +65,8 @@ services:
       - ./fastapi-server/.env
     depends_on:
       redis:
+        condition: service_healthy
+      web:
         condition: service_healthy
     restart: always
 
@@ -69,6 +83,8 @@ services:
       - ./fastapi-server/.env
     depends_on:
       redis:
+        condition: service_healthy
+      web:
         condition: service_healthy
       celery_worker:
         condition: service_started
