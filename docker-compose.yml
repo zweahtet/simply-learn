@@ -69,6 +69,11 @@ services:
       web:
         condition: service_healthy
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
 
   flower:
     build:
@@ -89,6 +94,10 @@ services:
       celery_worker:
         condition: service_started
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   redis_data:

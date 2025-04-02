@@ -5,7 +5,11 @@ from typing import ClassVar, List, Optional, Mapping, Iterable
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from qdrant_client import models, QdrantClient
-from utils.embeddings import dense_embedding_model, sparse_embedding_model, late_interaction_embedding_model
+from utils.embeddings import (
+    get_dense_embedding_model,
+    get_sparse_embedding_model,
+    get_late_interaction_embedding_model,
+)
 from utils.text_splitter import get_sentence_splitter
 from llama_index.core.schema import Document as LlamaIndexDocument
 
@@ -58,6 +62,11 @@ class YouTubeVectorSpace(QdrantVectorSpace):
         super().__init__(collection_name=self.COLLECTION_NAME)
 
     def recommend(self, query: str):
+        # lazy load the embedding models
+        dense_embedding_model = get_dense_embedding_model()
+        sparse_embedding_model = get_sparse_embedding_model()
+        late_interaction_embedding_model = get_late_interaction_embedding_model()
+
         # retrieval
         dense_vectors = next(dense_embedding_model.query_embed(query))
         sparse_vectors = next(sparse_embedding_model.query_embed(query))
@@ -146,6 +155,9 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             List of documents matching the query.
         """
         try:
+            # Lazy-load the embedding model
+            dense_embedding_model = get_dense_embedding_model()
+
             # Use dense embedding model for retrieval
             dense_vectors = next(dense_embedding_model.query_embed(query))
 
@@ -182,24 +194,22 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             print(f"Error retrieving documents: {e}")
             raise SystemError(f"Error retrieving documents: {e}")
 
-    def store_documents(
-        self,
-        documents: List[LlamaIndexDocument],
-        batch_size: int = 5,
-        parallel: int = 4,
-    ) -> List[str]:
+    def prepare_vector_points(
+        self, documents: List[LlamaIndexDocument]
+    ) -> List[models.PointStruct]:
         """
-        Split document into small chunks and store in vector database.
+        Split documents into chunks and create vector points without storing them.
 
         Args:
-            documents (Iterable[LlamaIndexDocument]): List of documents to be stored in vector database.
-            batch_size (int): Number of documents to be processed in parallel.
-            parallel (int): Number of parallel processes to be used.
+            documents (List[LlamaIndexDocument]): List of documents to be processed
 
         Returns:
-            List of chunk IDs
+            List of PointStruct objects ready to be stored
         """
         try:
+            # Lazy-load the embedding model
+            dense_embedding_model = get_dense_embedding_model()
+
             # Use smaller chunks for the vector DB than for processing
             # This allows for more granular retrieval
             doc_splitter = get_sentence_splitter()
@@ -217,7 +227,6 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                                 )
                             )
                         },
-                        # payload=chunk.metadata,
                         payload={
                             "document": chunk.get_content(),
                             **chunk.metadata,
@@ -225,25 +234,82 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                     )
                 )
 
+            return points
+        except Exception as e:
+            print(f"Error preparing vector points: {e}")
+            raise SystemError(f"Error preparing vector points: {e}")
+
+    def store_vector_points(
+        self,
+        points: List[models.PointStruct],
+        batch_size: int = 10,
+        parallel: int = 1,
+        max_retries: int = 3,
+    ) -> List[str]:
+        """
+        Store pre-created vector points in the database.
+
+        Args:
+            points (List[models.PointStruct]): The points to be stored
+            batch_size (int): Number of points to upload in each batch
+            parallel (int): Number of parallel processes to use
+            max_retries (int): Maximum number of retries on failure
+
+        Returns:
+            List of point IDs
+        """
+        try:
             # Store the points in the vector database
             self.client.upload_points(
                 collection_name=self.collection_name,
                 points=points,
-                batch_size=10,
-                parallel=4,
-                max_retries=3,
+                batch_size=batch_size,
+                parallel=parallel,
+                max_retries=max_retries,
                 wait=True,
             )
 
             return [point.id for point in points]
         except Exception as e:
+            print(f"Error storing vector points in DB: {e}")
+            raise SystemError(f"Error storing vector points in DB: {e}")
+
+    def store_documents(
+        self,
+        documents: List[LlamaIndexDocument],
+        batch_size: int = 5,
+        parallel: int = 4,
+        max_retries: int = 3,
+    ) -> List[str]:
+        """
+        Split document into small chunks and store in vector database.
+
+        Args:
+            documents (Iterable[LlamaIndexDocument]): List of documents to be stored in vector database.
+            batch_size (int): Number of documents to be processed in parallel.
+            parallel (int): Number of parallel processes to be used.
+            max_retries (int): Maximum number of retries on failure.
+
+        Returns:
+            List of chunk IDs
+        """
+        try:
+            # First prepare the points
+            points = self.prepare_vector_points(documents)
+
+            # Then store them
+            return self.store_vector_points(
+                points=points,
+                batch_size=batch_size,
+                parallel=parallel,
+                max_retries=max_retries,
+            )
+        except Exception as e:
             print(f"Error storing documents in vector DB: {e}")
             raise SystemError(f"Error storing documents in vector DB: {e}")
         finally:
-            # Clean up the document chunks
-            del doc_chunks
-            del doc_splitter
-            del points
+            # Clean up resources
+            pass
 
     def get_documents_by_file_id(self, file_id: str) -> List[LlamaIndexDocument]:
         """
