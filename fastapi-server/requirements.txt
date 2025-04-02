@@ -14,3 +14,7 @@ llama-index-core
 supabase
 python-json-logger
 platformdirs
+python-multipart
+celery
+flower
+watchdog

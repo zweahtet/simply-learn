@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     REDIS_PORT: int
     REDIS_PASSWORD: str
 
+    # Celery
+    CELERY_BROKER_URL: str
+    CELERY_RESULT_BACKEND: str
+
     # Qdrant
     QDRANT_HOST_URL: str
     QDRANT_API_KEY: str

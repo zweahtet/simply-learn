@@ -12,7 +12,19 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Union, List, Dict, Any, Annotated
 from pydantic import BaseModel, Field
-from fastapi import status, APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Request, Form
+from fastapi import (
+    status,
+    APIRouter,
+    UploadFile,
+    File,
+    HTTPException,
+    Depends,
+    BackgroundTasks,
+    Request,
+    Form,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from services.simplify import TextSimplificationAgent, simplification_progress
 from services.summarize import DocumentSummarizer
@@ -20,6 +32,7 @@ from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from schemas import BaseRequest, BaseResponse
 from api.dependencies import RedisDep, CurrentAuthContext, SupabaseAsyncClientDep
+from celery_main import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +64,111 @@ class FileUploadResponse(BaseResponse):
     )
 
 
+@router.post("/upload")
+async def upload_file(
+    redis_client: RedisDep,
+    auth_context: CurrentAuthContext,
+    supabase_client: SupabaseAsyncClientDep,
+    file_id: Annotated[str, Form(...)],
+    file: Annotated[UploadFile, File(...)],
+):
+    """Upload a file, queue a processing task in celery, and return the file id for tracking"""
+    current_user = auth_context.user
+    await supabase_client.auth.set_session(auth_context.access_token, refresh_token="")
+
+    try:
+        # TODO: Sanitize file name
+        filename = file.filename
+        if not filename:
+            # set the file id as the filename if not provided
+            filename = file_id = file.content_type.split("/")[-1]
+
+        # Store the file in a temporary directory
+        logger.info(f"Saving file {file_id} to temporary location ...")
+        temp_user_dir = pathlib.Path(f"{TEMP_FILE_DIR}/{current_user.id}")
+        temp_file_dir = temp_user_dir / file_id
+        os.makedirs(temp_file_dir, exist_ok=True)
+        temp_file_path = temp_file_dir / filename
+        with open(temp_file_path, "wb") as f:
+            f.write(await file.read())
+        logger.info(f"File saved at: {temp_file_path}")
+
+        # Create storage path
+        logger.info(f"Saving file {file_id} to Supabase storage ...")
+        supabase_storage_path = f"{current_user.id}/{file_id}/{filename}"
+        supabase_signed_upload_url = await supabase_client.storage.from_(
+            "attachments"
+        ).create_signed_upload_url(
+            path=supabase_storage_path,
+        )
+        supabase_upload_response = await supabase_client.storage.from_(
+            "attachments"
+        ).upload_to_signed_url(
+            path=supabase_signed_upload_url.get("path"),
+            token=supabase_signed_upload_url.get("token"),
+            file=temp_file_path,
+            file_options={
+                "upsert": "true",
+                "content-type": file.content_type,
+            },
+        )
+        logger.info(
+            f"File uploaded to Supabase storage: {supabase_upload_response.path}"
+        )
+
+        # Set initial status in Redis
+        file_processing_status_key = (
+            f"document-processing:status:{current_user.id}:{file_id}"
+        )
+        redis_client.set(file_processing_status_key, "pending", ex=CACHE_TTL)
+
+        # Queue the processing task in Celery
+        try:
+            # Define temp images path for the task
+            temp_images_path = str(temp_file_dir / "images")
+
+            # Queue document processing task
+            task = celery_app.send_task(
+                name="tasks.document_processing.process_document",
+                args=[
+                    str(temp_file_path),
+                    temp_images_path,
+                    file_id,
+                    auth_context.access_token,
+                ],
+            )
+
+            logger.info(f"Celery task {task.id} created for processing file: {file_id}")
+
+            return JSONResponse(
+                content={
+                    "id": file_id,
+                    "task_id": task.id,
+                },
+                status_code=status.HTTP_202_ACCEPTED,
+            )
+        except Exception as task_error:
+            logger.error(f"Failed to queue task: {task_error}")
+            redis_client.set(file_processing_status_key, "error", ex=CACHE_TTL)
+            return JSONResponse(
+                content={
+                    "id": file_id,
+                    "message": "Failed to queue processing task",
+                },
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+    except Exception as e:
+        # Handle any errors that occur during file processing setup
+        logger.error(f"Error in process_file endpoint: {e}")
+        return JSONResponse(
+            content={
+                "id": file_id,
+                "message": str(e),
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
 @router.post("/{file_id}/process")
 async def process_file(
     background_tasks: BackgroundTasks,
@@ -79,9 +197,6 @@ async def process_file(
 
         # Define file path
         temp_file_path = pathlib.Path(temp_file_dir / filename)
-
-        # Create directories if they don't exist
-        # os.makedirs(file_path.parent, exist_ok=True)
 
         # Save the file in temporary directory
         # Save file using chunked reading to handle large files
@@ -203,43 +318,6 @@ async def process_file(
             },
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
-
-
-class DocumentStatusResponse(BaseResponse):
-    """
-    Response schema for document processing status.
-    """
-
-    file_id: str = Field(description="Unique identifier for the file")
-    status: str = Field(description="Status of the document processing")
-    message: Optional[str] = Field(description="Additional message or error details")
-
-
-@router.get(
-    "/{file_id}/status",
-    description="Check the status of a file",
-    response_model=DocumentStatusResponse,
-)
-async def check_document_status(
-    file_id: str,
-    redis_client: RedisDep,
-    auth_context: CurrentAuthContext,
-):
-    """Check the status of a file processing task"""
-    current_user = auth_context.user
-
-    # Check status in Redis
-    status_key = f"file:status:{current_user.id}:{file_id}"
-    task_status = redis_client.get(status_key)
-
-    if task_status is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No processing found for file ID: {file_id}",
-        )
-
-    # Return the status
-    return {"file_id": file_id, "status": task_status, "message": None}
 
 
 @router.post("/{file_id}/summarize")

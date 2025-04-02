@@ -1,17 +1,15 @@
 services:
-  api:
+  web:
     build: 
       context: fastapi-server
-      dockerfile: Dockerfile
+      dockerfile: ./compose/local/fastapi/Dockerfile
     ports:
       - "8000:8000"
+    command: ["/start.sh"]
     volumes:
       - ./fastapi-server:/app
-      - shared_data:/app/temp_files
     env_file: 
       - ./fastapi-server/.env
-    environment:
-      - PYTHONPATH=/app
     restart: always
     depends_on:
       - redis
@@ -28,48 +26,53 @@ services:
       timeout: 5s
       retries: 3
     command: redis-server --save 60 1 --loglevel warning
+    restart: always
 
   celery_worker:
     build:
       context: fastapi-server
-      dockerfile: Dockerfile
+      dockerfile: ./compose/local/fastapi/Dockerfile
+    command: ["/start-celery-worker.sh"]
     volumes:
       - ./fastapi-server:/app
-      - shared_data:/app/temp_files
     env_file: 
       - ./fastapi-server/.env
-    environment:
-      - PYTHONPATH=/app
-      - C_FORCE_ROOT=true  # Allow running as root (only in dev)
-    command: celery -A celery_main worker --loglevel=info --concurrency=4
     restart: always
     depends_on:
-      - redis
-    deploy:
-      replicas: 2  # Run multiple worker instances
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
+      redis:
+        condition: service_healthy
 
-  # Optional: Flower for monitoring Celery
+  celery_beat:
+    build:
+      context: fastapi-server
+      dockerfile: ./compose/local/fastapi/Dockerfile
+    command: ["/start-celery-beat.sh"]
+    volumes:
+      - ./fastapi-server:/app
+    env_file:
+      - ./fastapi-server/.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
   flower:
     build:
       context: fastapi-server
-      dockerfile: Dockerfile
+      dockerfile: ./compose/local/fastapi/Dockerfile
     volumes:
       - ./fastapi-server:/app
-    command: celery -A celery_main flower --port=5555
+    command: ["/start-celery-flower.sh"]
     ports:
       - "5555:5555"
     env_file:
       - ./fastapi-server/.env
-    environment:
-      - PYTHONPATH=/app
     depends_on:
-      - redis
-      - celery_worker
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+    restart: always
 
 volumes:
   redis_data:
-  shared_data: # Shared volume for temp files
