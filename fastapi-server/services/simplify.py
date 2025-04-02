@@ -14,7 +14,7 @@ from llama_index.core.schema import Document as LlamaIndexDocument
 
 from core.config import settings
 from utils.defaults import GroqModels
-from utils.embeddings import dense_embedding_model
+from utils.embeddings import get_dense_embedding_model
 from utils.text_splitter import get_sentence_splitter
 from utils.vector_store import AttachmentVectorSpace
 from schemas import CognitiveProfile
@@ -33,7 +33,7 @@ qdrant_client = QdrantClient(
     api_key=settings.QDRANT_API_KEY,
 )
 qdrant_client.set_model(
-    embedding_model_name=dense_embedding_model.model_name,
+    embedding_model_name=get_dense_embedding_model().model_name,
     cache_dir=settings.FASTEMBED_MODELS_CACHE_DIR,
 )
 
