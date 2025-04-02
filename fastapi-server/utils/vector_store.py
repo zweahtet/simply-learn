@@ -291,7 +291,7 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             max_retries (int): Maximum number of retries on failure.
 
         Returns:
-            List of chunk IDs
+            List of point IDs
         """
         try:
             # First prepare the points
