@@ -66,7 +66,6 @@ class FileUploadResponse(BaseResponse):
 
 @router.post("/upload")
 async def upload_file(
-    redis_client: RedisDep,
     auth_context: CurrentAuthContext,
     supabase_client: SupabaseAsyncClientDep,
     file_id: Annotated[str, Form(...)],
@@ -116,12 +115,6 @@ async def upload_file(
             f"File uploaded to Supabase storage: {supabase_upload_response.path}"
         )
 
-        # Set initial status in Redis
-        file_processing_status_key = (
-            f"document-processing:status:{current_user.id}:{file_id}"
-        )
-        redis_client.set(file_processing_status_key, "pending", ex=CACHE_TTL)
-
         # Queue the processing task in Celery
         try:
             # Queue document processing task
@@ -145,7 +138,6 @@ async def upload_file(
             )
         except Exception as task_error:
             logger.error(f"Failed to queue task: {task_error}")
-            redis_client.set(file_processing_status_key, "error", ex=CACHE_TTL)
             return JSONResponse(
                 content={
                     "id": file_id,
