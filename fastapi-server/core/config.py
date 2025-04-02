@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
+    TEMP_DIR: str = "./temp"
 
     # Fastembed
     FASTEMBED_MODELS_CACHE_DIR: str = "./fastembed_models"
@@ -33,5 +34,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
 
 settings = Settings()

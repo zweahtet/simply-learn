@@ -7,6 +7,8 @@ from celery_main import celery_app
 from utils.file_reader import PDFMarkdownReader
 from utils.vector_store import AttachmentVectorSpace
 from utils.supabase import get_supabase_client
+from datetime import datetime
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -313,4 +315,138 @@ def process_document_chain(self, user_jwt: str, temp_file_path: str, file_id: st
         logger.error(
             f"Error setting up document processing chain for {file_id}: {str(e)}"
         )
+        raise
+
+
+@celery_app.task(
+    bind=True, name="tasks.document_processing.summarize_document", base=BaseTask
+)
+def summarize_document(self, user_jwt: str, file_id: str):
+    """
+    Summarize a processed document and store the summary.
+
+    Args:
+        user_jwt: JWT token for the user
+        file_id: ID of the file to summarize
+    """
+    try:
+        logger.info(f"Starting document summarization for file: {file_id}")
+
+        # Authenticate with Supabase
+        supabase_client = get_supabase_client()
+        supabase_auth_response = supabase_client.auth.set_session(
+            access_token=user_jwt, refresh_token=""
+        )
+        user_id = supabase_auth_response.user.id
+
+        # Update task state
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "file_id": file_id,
+                "user_id": user_id,
+                "stage": "Retrieving document content",
+                "progress": 10,
+            },
+        )
+
+        # Retrieve documents from vector store
+        logger.info(f"Retrieving documents for file ID: {file_id}")
+        attachment_vs = AttachmentVectorSpace()
+        page_docs = attachment_vs.get_documents_by_file_id(file_id)
+
+        if not page_docs:
+            raise Exception("No document content found in vector store")
+
+        # Update task state
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "file_id": file_id,
+                "user_id": user_id,
+                "stage": "Generating summary",
+                "progress": 30,
+            },
+        )
+
+        # Create the summarizer
+        from services.summarize import DocumentSummarizer
+
+        summarizer = DocumentSummarizer(
+            user_id=user_id,
+            file_id=file_id,
+            verbose=True,
+        )
+
+        # Process the pages
+        logger.info(f"Processing {len(page_docs)} pages for summarization")
+        summary = summarizer.process_pages(pages=page_docs)
+
+        # Update task state
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "file_id": file_id,
+                "user_id": user_id,
+                "stage": "Storing summary",
+                "progress": 70,
+            },
+        )
+
+        # Format summary as JSON
+        summary_data = {
+            "content": summary,
+            "fileId": file_id,
+            "createdAt": datetime.now().isoformat(),
+        }
+
+        # Create the directory structure if it doesn't exist
+        temp_file_path = pathlib.Path(
+            f"{settings.TEMP_DIR}/{user_id}/{file_id}/summary.json"
+        )
+        temp_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save summary locally
+        with open(temp_file_path, "w", encoding="utf-8") as f:
+            json.dump(summary_data, f, ensure_ascii=False, indent=4)
+        logger.info(f"Summary saved locally at: {temp_file_path}")
+
+        # Generate signed upload URL and token for secure upload
+        signed_upload_response = supabase_client.storage.from_(
+            "attachments"
+        ).create_signed_upload_url(
+            path=f"{user_id}/{file_id}/summary.json",
+        )
+
+        # Upload the summary to Supabase
+        logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
+        upload_summary_response = supabase_client.storage.from_(
+            "attachments"
+        ).upload_to_signed_url(
+            path=signed_upload_response.get("path"),
+            token=signed_upload_response.get("token"),
+            file=temp_file_path,
+            file_options={
+                "upsert": "true",
+                "content-type": "application/json",
+            },
+        )
+
+        if upload_summary_response.path is None:
+            raise Exception("Failed to upload summary to Supabase")
+
+        logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
+
+        # Clean up local files
+        os.remove(temp_file_path)
+
+        # Return successful result
+        return {
+            "file_id": file_id,
+            "user_id": user_id,
+            "summary_length": len(summary),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in summarization task: {e}")
         raise
