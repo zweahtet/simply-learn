@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./fastapi-server:/app
+      - shared_data:/app/temp_files
     env_file: 
       - ./fastapi-server/.env
     environment:
@@ -26,23 +27,49 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    command: redis-server --save 60 1 --loglevel warning
+
+  celery_worker:
+    build:
+      context: fastapi-server
+      dockerfile: Dockerfile
+    volumes:
+      - ./fastapi-server:/app
+      - shared_data:/app/temp_files
+    env_file: 
+      - ./fastapi-server/.env
+    environment:
+      - PYTHONPATH=/app
+      - C_FORCE_ROOT=true  # Allow running as root (only in dev)
+    command: celery -A celery_main worker --loglevel=info --concurrency=4
+    restart: always
+    depends_on:
+      - redis
+    deploy:
+      replicas: 2  # Run multiple worker instances
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Optional: Flower for monitoring Celery
+  flower:
+    build:
+      context: fastapi-server
+      dockerfile: Dockerfile
+    volumes:
+      - ./fastapi-server:/app
+    command: celery -A celery_main flower --port=5555
+    ports:
+      - "5555:5555"
     env_file:
       - ./fastapi-server/.env
-    command: redis-server --save 60 1 --loglevel warning
+    environment:
+      - PYTHONPATH=/app
+    depends_on:
+      - redis
+      - celery_worker
 
 volumes:
   redis_data:
-
-  
-  # Example database service if needed:
-  # db:
-  #   image: postgres:14
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   environment:
-  #     - POSTGRES_PASSWORD=postgres
-  #     - POSTGRES_USER=postgres
-  #     - POSTGRES_DB=app
-
-# volumes:
-#   postgres_data:
+  shared_data: # Shared volume for temp files
