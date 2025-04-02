@@ -125,16 +125,15 @@ async def upload_file(
         # Queue the processing task in Celery
         try:
             # Define temp images path for the task
-            temp_images_path = str(temp_file_dir / "images")
+            # temp_images_path = str(temp_file_dir / "images")
 
             # Queue document processing task
             task = celery_app.send_task(
-                name="tasks.document_processing.process_document",
+                name="tasks.document_processing.process_document_chain",
                 args=[
-                    str(temp_file_path),
-                    temp_images_path,
-                    file_id,
                     auth_context.access_token,
+                    str(temp_file_path),
+                    file_id,
                 ],
             )
 
