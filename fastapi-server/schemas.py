@@ -5,12 +5,28 @@ from typing import List, Dict, Any, Optional, ClassVar
 class BaseSchema(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         alias_generator=to_camel,
+        populate_by_name=True,
         from_attributes=True,
         extra="forbid",
     )
 
+class BaseRequest(BaseSchema):
+    """
+    Base class for all request schemas.
+    """
+    pass
+
+class BaseResponse(BaseSchema):
+    """
+    Base class for all response schemas.
+    """
+    pass
+
 
 class CognitiveProfile(BaseModel):
+    """
+    Represents a user's cognitive profile, including various cognitive functions.
+    """
     memory: int
     attention: int
     language: int
