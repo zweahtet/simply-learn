@@ -9,7 +9,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from schemas import UserInDB, CognitiveProfile
 from gotrue.types import AuthResponse, User, Session
-from supabase.client import AsyncClient, create_async_client, AsyncClientOptions
+from supabase.client import AsyncClient
+from utils.supabase import get_supabase_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +36,7 @@ security_scheme = HTTPBearer(
 )
 AuthDep = Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)]
 
-
 # Supabase dependency injection
-# https://supabase.com/docs/reference/python/select
-async def get_supabase_async_client() -> AsyncClient:
-    """for validation access_token init at life span event"""
-    supabase_client = await create_async_client(
-        supabase_url=settings.SUPABASE_URL,
-        supabase_key=settings.SUPABASE_ANON_KEY,
-        options=AsyncClientOptions(
-            auto_refresh_token=True,
-        ),
-    )
-
-    if not supabase_client:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Supabase client not initialized",
-        )
-
-    return supabase_client
-
-
 SupabaseAsyncClientDep = Annotated[AsyncClient, Depends(get_supabase_async_client)]
 
 
@@ -77,18 +57,6 @@ async def get_auth_context(
     supabase_client: SupabaseAsyncClientDep,
 ) -> AuthContext:
     """Get current user from access_token and validate it with supabase"""
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing",
-        )
-
-    if not supabase_client:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Supabase client not initialized",
-        )
-
     # Verify jwt using supabase
     try:
         user_auth_response = await supabase_client.auth.get_user(jwt=authorization.credentials)
