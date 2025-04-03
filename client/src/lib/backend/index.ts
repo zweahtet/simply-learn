@@ -94,10 +94,4 @@ class RestClient {
 
 export const restClient = new RestClient({
     baseUrl: process.env.NEXT_PUBLIC_API_URL,
-    defaultOpts: {
-        method: "GET",
-        headers: {
-            "Content-Type": "application/json",
-        },
-    },
 });

@@ -85,57 +85,159 @@ export async function deleteFile(userId: string, fileId: string) {
     }
 }
 
-/**
- * Helper function to call the Supabase API to upload a file to the bucket.
- * @param {string} userId - The user ID to upload files for.
- * @param {File} file - The file to upload.
- * @param {string} fileId - The file ID to upload.
- */
-export async function uploadFile(userId: string, file: File, fileId: string): Promise<FileMetadata> {
-    const filePath = `${userId}/${fileId}/${file.name}`;
-    const { data: createSignedUrlData, error: createSignedUrlError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).createSignedUploadUrl(filePath, {
-        upsert: true,
-    });
+// /**
+//  * Helper function to call the Supabase API to upload a file to the bucket.
+//  * @param {string} userId - The user ID to upload files for.
+//  * @param {File} file - The file to upload.
+//  * @param {string} fileId - The file ID to upload.
+//  */
+// export async function uploadFile(userId: string, file: File, fileId: string): Promise<FileMetadata> {
+//     const filePath = `${userId}/${fileId}/${file.name}`;
+//     const { data: createSignedUrlData, error: createSignedUrlError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).createSignedUploadUrl(filePath, {
+//         upsert: true,
+//     });
 
-    if (createSignedUrlError) {
-        throw new Error(createSignedUrlError.message);
-    }
-    if (!createSignedUrlData) throw new Error("Failed to create signed URL");
+//     if (createSignedUrlError) {
+//         throw new Error(createSignedUrlError.message);
+//     }
+//     if (!createSignedUrlData) throw new Error("Failed to create signed URL");
 
-    const { token, path } = createSignedUrlData;
-    const { error: uploadError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, {
-        upsert: true,
-        contentType: file.type,
-        metadata: {
-            name: file.name,
-            size: file.size.toString(),
-            type: file.type,
-            createdBy: userId,
-        },
-    });
+//     const { token, path } = createSignedUrlData;
+//     const { error: uploadError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).uploadToSignedUrl(path, token, file, {
+//         upsert: true,
+//         contentType: file.type,
+//         metadata: {
+//             name: file.name,
+//             size: file.size.toString(),
+//             type: file.type,
+//             createdBy: userId,
+//         },
+//     });
 
-    if (uploadError) {
-        throw new Error(uploadError.message);
-    }
+//     if (uploadError) {
+//         throw new Error(uploadError.message);
+//     }
 
-    return {
-        id: fileId,
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        createdAt: new Date().toISOString(),
-    };
+//     return {
+//         id: fileId,
+//         name: file.name,
+//         type: file.type,
+//         size: file.size,
+//         createdAt: new Date().toISOString(),
+//     };
+// }
+
+type FileUploadResponse = {
+    id: string;
+    task_id: string;
 }
 
-export async function processFile(fileId: string, file: File) {
-    return restClient.fetchWithAuth(`/files/${fileId}/process`)
+export async function uploadFile(fileId: string, file: File): Promise<FileUploadResponse> {
+    const formData = new FormData();
+    formData.append("fileId", fileId);
+    formData.append("file", file);
+
+    const response = await restClient.fetch(`/files/upload`, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!response.ok) {
+        throw new Error("Failed to upload file");
+    }
+
+    return response.json();
+}
+
+
+/** Summarization Endpoints*/
+
+/**
+ * Helper function to call the FastAPI backend to summarize a file.
+ * @param {string} fileId - The ID of the file to summarize.
+ * @returns {Promise<DocumentSummary>} - A promise that resolves to a document summary object.
+ */
+export async function summarizeFile(fileId: string) {
+    const response = await restClient.fetch(`/files/${fileId}/summarize`, {
+        method: "POST",
+    })
+    if (!response.ok) {
+        throw new Error("Failed to summarize file");
+    }
+
+    return response.json();
 }
 
 /**
  * Helper function to call the FastAPI backend to get the summary of a file.
- * @param {string} fileId - The file ID to get the summary for.
- * @returns 
+ * @param {string} fileId - The ID of the file to get the summary for.
+ * @returns {Promise<DocumentSummary>} - A promise that resolves to a document summary object.
  */
-export async function getSummary(fileId: string): Promise<DocumentSummary> {
-    return restClient.fetchWithAuth(`/files/${fileId}/summary`)
+export async function getSummary(fileId: string) {
+    const response = await restClient.fetch(`/files/${fileId}/summary`)
+    if (!response.ok) {
+        throw new Error("Failed to get summary");
+    }
+
+    // we need to download the file from the url and return the file
+    const data = await response.json();
+    const downloadUrl = data.downloadUrl;
+
+    const downloadResponse = await fetch(downloadUrl);
+    if (!downloadResponse.ok) {
+        throw new Error("Failed to download summary");
+    }
+
+    const summaryJson = await downloadResponse.json();
+
+    return {
+        id: fileId,
+        summary: summaryJson.content,
+    }
 }
+
+/**
+ * Helper function to track task status using Server-Sent Events (SSE).
+ * @param {string} taskId - The ID of the task to track.
+ * @param {(data: any) => void} onUpdate - Callback function that will be called with each status update.
+ * @returns {() => void} - A function to close the SSE connection.
+ */
+export function trackTaskStatus(
+    taskId: string,
+    onUpdate: (data: any) => void
+): () => void {
+    const eventSource = new EventSource(
+        `${restClient.baseUrl}/files/sse/tasks/${taskId}`
+    );
+
+    eventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            onUpdate(data);
+
+            // Auto-close the connection when the task is complete
+            if (
+                data.status === "SUCCESS" ||
+                data.status === "FAILURE" ||
+                data.status === "REVOKED"
+            ) {
+                eventSource.close();
+            }
+        } catch (error) {
+            console.error("Error parsing SSE message:", error);
+        }
+    };
+
+    eventSource.onerror = (error) => {
+        console.error("SSE connection error:", error);
+        eventSource.close();
+        onUpdate({ error: "Connection error", taskId });
+    };
+
+    // Return a function to manually close the connection
+    return () => {
+        eventSource.close();
+    };
+}
+
+

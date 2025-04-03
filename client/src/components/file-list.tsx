@@ -345,15 +345,15 @@ export function FileListCard({
 				return updatedMap;
 			});
 
-			return uploadFile(user.id, file, fileId)
-				.then((fileMetadata) => {
+			return uploadFile(fileId, file)
+				.then((response) => {
 					// Update to "completed" status
 					setUploadStatusMap((prevMap) => {
 						const updatedMap = new Map(prevMap);
 						updatedMap.set(fileId, "completed");
 						return updatedMap;
 					});
-					return fileMetadata;
+					return response;
 				})
 				.catch((error) => {
 					console.error("Upload error:", error);

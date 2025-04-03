@@ -157,174 +157,106 @@ async def upload_file(
         )
 
 
-# @router.post("/{file_id}/summarize")
-# async def summarize_file(
-#     background_tasks: BackgroundTasks,
-#     redis_client: RedisDep,
-#     auth_context: CurrentAuthContext,
-#     supabase_client: SupabaseAsyncClientDep,
-#     file_id: str,
-# ):
-#     """Generate a summary for a previously processed file"""
-#     current_user = auth_context.user
-
-#     # Check if the file has been processed
-#     status_key = f"file:status:{current_user.id}:{file_id}"
-#     file_status = redis_client.get(status_key)
-
-#     if not file_status or file_status == "error":
-#         return JSONResponse(
-#             content={
-#                 "status": "error",
-#                 "message": "File not found or processing failed. Process the file first.",
-#             },
-#             status_code=status.HTTP_404_NOT_FOUND,
-#         )
-
-#     if file_status in ["pending", "processing"]:
-#         return JSONResponse(
-#             content={
-#                 "status": "pending",
-#                 "message": "File is still being processed. Try again when processing is complete.",
-#             },
-#             status_code=status.HTTP_409_CONFLICT,
-#         )
-
-#     # Set up summarization status
-#     summary_status_key = f"summarization:status:{current_user.id}:{file_id}"
-#     redis_client.set(summary_status_key, "pending")
-
-#     # Define background task for summarization
-#     async def summarize_content():
-#         try:
-#             # Update status
-#             redis_client.set(summary_status_key, "summarizing")
-
-#             # Retrieve documents from vector store
-#             logger.info(f"Retrieving documents for file ID: {file_id}")
-#             attachment_vs = AttachmentVectorSpace()
-#             page_docs = attachment_vs.get_documents_by_file_id(file_id)
-
-#             if not page_docs:
-#                 raise Exception("No document content found in vector store")
-
-#             # Create the summarizer
-#             summarizer = DocumentSummarizer(
-#                 user_id=current_user.id,
-#                 file_id=file_id,
-#                 verbose=True,
-#             )
-
-#             # Process the pages
-#             logger.info(f"Processing {len(page_docs)} pages for summarization")
-#             summary = summarizer.process_pages(pages=page_docs)
-
-#             # Store the summary in Supabase
-#             logger.info(
-#                 f"Creating Supabase Signed Upload Token for file ID: {file_id} ..."
-#             )
-#             # Set the client's session with the user's access token
-#             try:
-#                 await supabase_client.auth.set_session(
-#                     auth_context.access_token, refresh_token=""
-#                 )
-#             except Exception as e:
-#                 logger.error(f"Error setting Supabase session: {e}")
-#                 raise
-
-#             # Generate signed upload URL and token for secure upload
-#             signed_upload_response = await supabase_client.storage.from_(
-#                 "attachments"
-#             ).create_signed_upload_url(
-#                 path=f"{current_user.id}/{file_id}/summary.json",
-#             )
-
-#             logger.info("signed upload response: %s", signed_upload_response)
-
-#             # Format your summary as a JSON structure
-#             summary_data = {
-#                 "content": summary,  # The actual summary text/content
-#                 "fileId": file_id,
-#                 "createdAt": datetime.now().isoformat(),
-#             }
-
-#             # Create a json file with the summary
-#             temp_file_path = pathlib.Path(
-#                 f"{settings.TEMP_DIR}/{current_user.id}/{file_id}/summary.json"
-#             )
-#             with open(temp_file_path, "w", encoding="utf-8") as f:
-#                 json.dump(summary_data, f, ensure_ascii=False, indent=4)
-#             logger.info(f"Summary saved locally at: {temp_file_path}")
-
-#             # Upload the summary to Supabase
-#             logger.info(f"Storing summary in Supabase for file ID: {file_id} ...")
-#             upload_summary_response = await supabase_client.storage.from_(
-#                 "attachments"
-#             ).upload_to_signed_url(
-#                 path=signed_upload_response.get("path"),
-#                 token=signed_upload_response.get("token"),
-#                 file=temp_file_path,
-#                 file_options={
-#                     "upsert": "true",
-#                     "content-type": "application/json",
-#                 },
-#             )
-#             if upload_summary_response.path is None:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#                     detail="Failed to upload summary to Supabase",
-#                 )
-#             logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
-
-#             # Update status in Redis to "completed"
-#             redis_client.set(summary_status_key, "completed")
-#             logger.info(f"Successfully summarized file ID: {file_id}")
-
-#             # Clean up local files
-#             os.remove(temp_file_path)
-
-#         except Exception as e:
-#             # Log the error
-#             logger.error(f"Error in summarization task: {e}")
-
-#             # Set status to "error" in Redis
-#             redis_client.set(summary_status_key, "error")
-
-#     # Run the summarization in the background
-#     logger.info(f"Starting background summarization task for file ID: {file_id}")
-#     background_tasks.add_task(summarize_content)
-#     return JSONResponse(
-#         content={
-#             "id": file_id,
-#             "status": "pending",
-#             "message": "Summarization started",
-#         },
-#         status_code=status.HTTP_202_ACCEPTED,
-#     )
-
-
-# New Celery-based summarize file endpoint
-@router.post("/{file_id}/summarize-with-celery")
-async def summarize_file_with_celery(
+@router.post("/{file_id}/summarize", description="Create a summary of the file.")
+async def summarize_file(
     auth_context: CurrentAuthContext,
     file_id: str,
 ):
     """Generate a summary for a previously processed file using Celery"""
-    from tasks.document_processing import summarize_document
-
     # Start Celery task
-    task = summarize_document.delay(auth_context.access_token, file_id)
+    try:
+        from tasks.document_processing import summarize_document
+        from celery.exceptions import CeleryError
+
+        task = summarize_document.delay(auth_context.access_token, file_id)
+
+    except CeleryError as ce:
+        logger.error(f"Celery error when starting summarization task: {ce}")
+        return JSONResponse(
+            content={
+                "id": file_id,
+                "message": "Failed to start summarization task",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in summarize endpoint: {e}")
+        return JSONResponse(
+            content={
+                "id": file_id,
+                "message": "An unexpected error occurred",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
     # Return task information to client
     return JSONResponse(
         content={
             "id": file_id,
             "task_id": task.id,  # Return Celery task ID for status tracking
-            "status": "pending",
             "message": "Summarization started with Celery",
         },
         status_code=status.HTTP_202_ACCEPTED,
     )
+
+
+@router.get(
+    "/{file_id}/summary", description="Get the summary of a file from Supabase storage"
+)
+async def get_summary(
+    file_id: str,
+    auth_context: CurrentAuthContext,
+    supabase_client: SupabaseAsyncClientDep,
+):
+    """Get the summary of a file if it exists in Supabase storage"""
+    current_user = auth_context.user
+    # TODO: cache the summary file content in Redis
+    
+    # Set the client's session with the user's access token
+    await supabase_client.auth.set_session(auth_context.access_token, refresh_token="")
+
+    try:
+        # Check if summary file exists in storage
+        file_dir = f"{current_user.id}/{file_id}"
+        file_list_response = await supabase_client.storage.from_("attachments").list(
+            path=file_dir,
+        )
+
+        # if summary file exists, return it
+        summary_exists = any(
+            item.get("name") == "summary.json" for item in file_list_response
+        )
+        if not summary_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No summary found for file ID: {file_id}",
+            )
+
+        # generate signed download URL with expiration
+        signed_download_url_response = await supabase_client.storage.from_(
+            "attachments"
+        ).create_signed_url(
+            path=f"{current_user.id}/{file_id}/summary.json",
+            expires_in=3600,  # 1 hour
+            options={"download": "true"},
+        )
+
+        return JSONResponse(
+            content={
+                "id": file_id,
+                "downloadUrl": signed_download_url_response.get("signedURL"),
+            },
+            status_code=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        logger.error(f"Error in get_summary endpoint: {e}")
+        return JSONResponse(
+            content={
+                "id": file_id,
+                "message": "An unexpected error occurred",
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 class DocumentSummaryProgress(BaseResponse):
@@ -439,39 +371,6 @@ async def get_summary_progress(
     return response
 
 
-# @router.get("/simplification-progress/{file_id}")
-# async def get_simplification_progress(request: Request, file_id: str):
-#     """
-#     Stream document simplification progress using Server-Sent Events
-#     """
-
-#     async def event_generator():
-#         while True:
-#             # Check if client disconnected
-#             if await request.is_disconnected():
-#                 break
-
-#             # Get current progress
-#             progress = simplification_progress.get_progress(file_id)
-
-#             if not progress:
-#                 # File not found or processing hasn't started
-#                 yield f"data: {json.dumps({'status': 'not_found'})}\n\n"
-#                 await asyncio.sleep(1)
-#                 continue
-
-#             # Send current progress
-#             yield f"data: {json.dumps(progress)}\n\n"
-
-#             # If completed or error, break the loop
-#             if progress["completed"] or progress["error"]:
-#                 break
-
-#             await asyncio.sleep(0.5)  # Update every 500ms
-
-#     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
 @router.get("/tasks/{task_id}")
 async def get_task_status(
     task_id: str,
@@ -480,77 +379,99 @@ async def get_task_status(
     """Get the status of a Celery task"""
     from celery.result import AsyncResult
 
-    # Get task result
-    task_result = AsyncResult(task_id)
-
-    # Get task state and info
-    result = {
-        "task_id": task_id,
-        "status": task_result.status,
-    }
-
-    # Add result info if available
-    if task_result.ready():
-        if task_result.successful():
-            result["result"] = task_result.result
-        else:
-            result["error"] = str(task_result.result)
-
-    # Add progress info if available
-    if hasattr(task_result, "info") and task_result.info:
-        if isinstance(task_result.info, dict) and "stage" in task_result.info:
-            result["progress"] = task_result.info
-
-    return result
-
-
-@router.websocket("/ws/tasks/{task_id}")
-async def task_status_websocket(
-    websocket: WebSocket,
-    task_id: str,
-):
-    """WebSocket endpoint for real-time task status updates"""
-    from celery.result import AsyncResult
-    import json
-    import asyncio
-
-    await websocket.accept()
-
     try:
-        # Poll task status and send updates to client
-        while True:
-            task_result = AsyncResult(task_id)
+        # Get task result
+        task_result = AsyncResult(task_id)
 
-            # Prepare status data
-            status_data = {
-                "task_id": task_id,
-                "status": task_result.status,
-            }
+        # Check if task exists
+        if not task_result:
+            return JSONResponse(
+                content={
+                    "error": "Task not found",
+                    "task_id": task_id,
+                },
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
 
-            # Add result info if available
-            if task_result.ready():
-                if task_result.successful():
-                    status_data["result"] = task_result.result
-                else:
-                    status_data["error"] = str(task_result.result)
+        # Get task state and info
+        result = {
+            "task_id": task_id,
+            "status": task_result.status,
+        }
 
-                # Send final status and close connection
-                await websocket.send_text(json.dumps(status_data))
-                break
+        # Add result info if available
+        if task_result.ready():
+            if task_result.successful():
+                result["result"] = task_result.result
+            else:
+                result["error"] = str(task_result.result)
 
             # Add progress info if available
             if hasattr(task_result, "info") and task_result.info:
                 if isinstance(task_result.info, dict) and "stage" in task_result.info:
-                    status_data["progress"] = task_result.info
+                    result["progress"] = task_result.info
 
-            # Send status update
-            await websocket.send_text(json.dumps(status_data))
-
-            # Wait before next poll
-            await asyncio.sleep(1)
-
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket client disconnected from task {task_id}")
+            return result
     except Exception as e:
-        logger.error(f"Error in WebSocket connection for task {task_id}: {e}")
-        await websocket.close()
+        logger.error(f"Unexpected error in get_task_status endpoint: {e}")
+        return JSONResponse(
+            content={
+                "task_id": task_id,
+                "error": "An unexpected error occurred",
+                "details": str(e),
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@router.get("/sse/tasks/{task_id}")
+async def task_status_sse(request: Request, task_id: str):
+    """Stream task status updates using Server-Sent Events"""
+    from celery.result import AsyncResult
+
+    async def event_generator():
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                # Get task result
+                task_result = AsyncResult(task_id)
+
+                # Prepare status data
+                status_data = {
+                    "task_id": task_id,
+                    "status": task_result.status,
+                }
+
+                # Add progress info if available
+                if hasattr(task_result, "info") and task_result.info:
+                    if (
+                        isinstance(task_result.info, dict)
+                        and "stage" in task_result.info
+                    ):
+                        status_data["progress"] = task_result.info
+
+                # Add result or error if task completed
+                if task_result.ready():
+                    if task_result.successful():
+                        status_data["result"] = task_result.result
+                    else:
+                        status_data["error"] = str(task_result.result)
+
+                    # Send final update and end stream
+                    yield f"data: {json.dumps(status_data)}\n\n"
+                    break
+
+                # Send status update
+                yield f"data: {json.dumps(status_data)}\n\n"
+
+                # Wait before next poll
+                await asyncio.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Error in SSE connection for task {task_id}: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
