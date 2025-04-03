@@ -227,12 +227,7 @@ def prepare_vectors(self, task_result: dict):
     """
     try:
         from llama_index.core.schema import Document as LlamaIndexDocument
-    except ImportError:
-        raise ImportError(
-            "llama_index is not installed. Please install it with 'pip install llama-index'"
-        )
 
-    try:
         file_id = task_result["file_id"]
         logger.info(f"Preparing vector embeddings for file: {file_id}")
 
@@ -257,6 +252,16 @@ def prepare_vectors(self, task_result: dict):
         points = attachment_vs.store_documents(page_docs, parallel=1, max_retries=1)
 
         logger.info(f"Generated {len(points)} vector points for file: {file_id}")
+
+        # Update task state
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "file_id": file_id,
+                "stage": "Processing complete",
+                "progress": 100,
+            },
+        )
         return task_result
     except Exception as e:
         logger.error(
@@ -283,24 +288,11 @@ def process_document_chain(self, user_jwt: str, temp_file_path: str, file_id: st
     """
     try:
         logger.info(f"Starting document processing chain for file: {file_id}")
-
-        # Extract user_id from JWT
-        supabase_client = get_supabase_client()
-        supabase_auth_response = supabase_client.auth.set_session(
-            access_token=user_jwt, refresh_token=""
-        )
-        user_id = supabase_auth_response.user.id
-
-        self.update_state(
-            state="STARTED",
-            meta={"file_id": file_id, "user_id": user_id, "stage": "Starting process"},
-        )
-
-        # Create a chain of tasks
+        # Import chain from celery
         from celery import chain
 
+        # Create a chain of tasks
         result = chain(
-            # Pass user_id instead of user_jwt to extract_content
             extract_content.s(user_jwt, temp_file_path, file_id),
             prepare_vectors.s(),
         ).apply_async()
@@ -309,7 +301,6 @@ def process_document_chain(self, user_jwt: str, temp_file_path: str, file_id: st
         return {
             "task_id": result.id,
             "file_id": file_id,
-            "user_id": user_id,
         }
     except Exception as e:
         logger.error(
@@ -330,6 +321,8 @@ def summarize_document(self, user_jwt: str, file_id: str):
         file_id: ID of the file to summarize
     """
     try:
+        from services.summarize import DocumentSummarizer
+
         logger.info(f"Starting document summarization for file: {file_id}")
 
         # Authenticate with Supabase
@@ -370,8 +363,6 @@ def summarize_document(self, user_jwt: str, file_id: str):
         )
 
         # Create the summarizer
-        from services.summarize import DocumentSummarizer
-
         summarizer = DocumentSummarizer(
             user_id=user_id,
             file_id=file_id,
@@ -439,6 +430,17 @@ def summarize_document(self, user_jwt: str, file_id: str):
 
         # Clean up local files
         os.remove(temp_file_path)
+
+        # Add final progress update
+        self.update_state(
+            state="PROGRESS",
+            meta={
+                "file_id": file_id,
+                "user_id": user_id,
+                "stage": "Summarization complete",
+                "progress": 100,
+            },
+        )
 
         # Return successful result
         return {
