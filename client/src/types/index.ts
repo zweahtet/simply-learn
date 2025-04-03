@@ -61,7 +61,8 @@ export interface AssessmentResultsSummary {
  * Document Summary 
  */
 export interface DocumentSummary {
-    summary: string;
-    keywords?: string[];
-    topics?: string[];
+    id: string; // document id
+    summary: string; // summary of the document
+    keywords?: string[]; // keywords in the document
+    topics?: string[]; // topics in the document
 }
