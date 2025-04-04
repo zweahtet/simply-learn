@@ -13,14 +13,32 @@ class GoogleGeminiEmbeddingFunction:
     def __init__(self, model_name: str):
         self.model_name = model_name
 
-    def embed(self, contents: ContentListUnion, task_type: str = "RETRIEVAL_DOCUMENT"):
+    def embed_text(self, contents: ContentListUnion, task_type: str = "RETRIEVAL_DOCUMENT"):
+        """
+        Generate text embeddings for a single text or batch of texts.
+
+        Args:
+            contents: Single text string or list of text strings to embed
+            task_type: The type of task for which embeddings are generated
+
+        Returns:
+            For a single input: A single embedding vector
+            For a batch input: A list of embedding vectors, one for each input text
+        """
         response = google_genai_client.models.embed_content(
             model=self.model_name,
             contents=contents,
-            config=EmbedContentConfig(task_type=task_type, output_dimensionality=1024),
+            config=EmbedContentConfig(task_type=task_type, output_dimensionality=1536),
         )
 
-        return [content_embedding.values for content_embedding in response.embeddings]
+        # If a single text was provided, return a single embedding
+        if isinstance(contents, str) or (
+            isinstance(contents, list) and len(contents) == 1
+        ):
+            return response.embeddings[0].values
+        # If multiple texts were provided, return a list of embeddings
+        else:
+            return [embedding.values for embedding in response.embeddings]
 
 
 # Initialize the embedding

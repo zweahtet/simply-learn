@@ -158,15 +158,13 @@ async def upload_file(
 
 
 @router.post("/{file_id}/summarize", description="Create a summary of the file.")
-async def summarize_file(
-    auth_context: CurrentAuthContext,
-    file_id: str,
-):
+async def summarize_file(file_id: str, auth_context: CurrentAuthContext):
     """Generate a summary for a previously processed file using Celery"""
-    # Start Celery task
     try:
         from tasks.document_processing import summarize_document
         from celery.exceptions import CeleryError
+
+        # TODO: Check if there are any running tasks with the same file_id
 
         task = summarize_document.delay(auth_context.access_token, file_id)
 
@@ -209,13 +207,14 @@ async def get_summary(
     supabase_client: SupabaseAsyncClientDep,
 ):
     """Get the summary of a file if it exists in Supabase storage"""
-    current_user = auth_context.user
-    # TODO: cache the summary file content in Redis
-    
-    # Set the client's session with the user's access token
-    await supabase_client.auth.set_session(auth_context.access_token, refresh_token="")
-
     try:
+        current_user = auth_context.user
+
+        # Set the client's session with the user's access token
+        await supabase_client.auth.set_session(
+            auth_context.access_token, refresh_token=""
+        )
+
         # Check if summary file exists in storage
         file_dir = f"{current_user.id}/{file_id}"
         file_list_response = await supabase_client.storage.from_("attachments").list(

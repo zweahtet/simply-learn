@@ -129,7 +129,7 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                 collection_name=self.collection_name,
                 vectors_config={
                     "dense": models.VectorParams(
-                        size=1024,
+                        size=1536,
                         distance=models.Distance.COSINE,
                         quantization_config=models.BinaryQuantization(
                             binary=models.BinaryQuantizationConfig(always_ram=True),
@@ -166,7 +166,7 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                 model_name="gemini-embedding-exp-03-07"
             )
 
-            dense_vectors = embedding_function.embed(
+            dense_vectors = embedding_function.embed_text(
                 contents=[query], task_type="RETRIEVAL_DOCUMENT"
             )
 
@@ -204,74 +204,76 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             raise SystemError(f"Error retrieving documents: {e}")
 
     def prepare_vector_points(
-        self, documents: List[LlamaIndexDocument]
-    ) -> List[models.PointStruct]:
+        self, documents: List[LlamaIndexDocument], batch_size: int = 32
+    ):
         """
-        Split documents into chunks and create vector points without storing them.
+        Split documents into chunks and create vector points in batches without storing them.
 
         Args:
-            documents (List[LlamaIndexDocument]): List of documents to be processed
+            documents (List[LlamaIndexDocument]): List of documents (rather pages) to be processed
+            batch_size (int): Number of chunks to embed in a single API call
 
         Returns:
-            List of PointStruct objects ready to be stored
+            Iterable of PointStruct objects ready to be stored
         """
         try:
             embedding_function = GoogleGeminiEmbeddingFunction(
                 model_name="gemini-embedding-exp-03-07"
             )
-            # Lazy-load the embedding model
-            # dense_embedding_model = get_dense_embedding_model()
-
             # Use smaller chunks for the vector DB than for processing
             # This allows for more granular retrieval
             doc_splitter = get_sentence_splitter()
             doc_chunks = doc_splitter.get_nodes_from_documents(documents)
 
-            points: List[models.PointStruct] = []
-            for chunk in doc_chunks:
-                points.append(
-                    models.PointStruct(
+            # Process in batches to avoid memory issues
+            for i in range(0, len(doc_chunks), batch_size):
+                current_batch = doc_chunks[i : i + batch_size]
+
+                # Prepare texts for batch embedding
+                texts_to_embed = [chunk.get_content("embed") for chunk in current_batch]
+
+                # Generate embeddings for the entire batch at once
+                batch_embeddings = embedding_function.embed_text(
+                    contents=texts_to_embed
+                )
+
+                # Create points using the batch embeddings
+                points = []
+                for j, chunk in enumerate(current_batch):
+                    point = models.PointStruct(
                         id=str(uuid.uuid4()),
-                        vector={
-                            # "dense": next(
-                            #     dense_embedding_model.embed(
-                            #         documents=chunk.get_content("embed")
-                            #     )
-                            # )
-                            "dense": embedding_function.embed(
-                                contents=[chunk.get_content("embed")]
-                            )
-                        },
+                        vector={"dense": batch_embeddings[j]},
                         payload={
                             "document": chunk.get_content(),
                             **chunk.metadata,
                         },
                     )
-                )
+                    points.append(point)
 
-            return points
+                for point in points:
+                    yield point
         except Exception as e:
             print(f"Error preparing vector points: {e}")
             raise SystemError(f"Error preparing vector points: {e}")
 
     def store_vector_points(
         self,
-        points: List[models.PointStruct],
-        batch_size: int = 10,
+        points: Iterable[models.PointStruct],
+        batch_size: int = 64,
         parallel: int = 1,
         max_retries: int = 3,
-    ) -> List[str]:
+    ):
         """
         Store pre-created vector points in the database.
 
         Args:
-            points (List[models.PointStruct]): The points to be stored
+            points (Iterable[models.PointStruct]): The points to be stored
             batch_size (int): Number of points to upload in each batch
             parallel (int): Number of parallel processes to use
             max_retries (int): Maximum number of retries on failure
 
         Returns:
-            List of point IDs
+            None
         """
         try:
             # Store the points in the vector database
@@ -283,8 +285,6 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                 max_retries=max_retries,
                 wait=True,
             )
-
-            return [point.id for point in points]
         except Exception as e:
             print(f"Error storing vector points in DB: {e}")
             raise SystemError(f"Error storing vector points in DB: {e}")
@@ -292,16 +292,16 @@ class AttachmentVectorSpace(QdrantVectorSpace):
     def store_documents(
         self,
         documents: List[LlamaIndexDocument],
-        batch_size: int = 5,
-        parallel: int = 4,
+        batch_size: int = 32,
+        parallel: int = 1,
         max_retries: int = 3,
-    ) -> List[str]:
+    ) -> None:
         """
         Split document into small chunks and store in vector database.
 
         Args:
-            documents (Iterable[LlamaIndexDocument]): List of documents to be stored in vector database.
-            batch_size (int): Number of documents to be processed in parallel.
+            documents (List[LlamaIndexDocument]): List of documents to be stored in vector database.
+            batch_size (int): Number of documents to be processed in parallel for storage.
             parallel (int): Number of parallel processes to be used.
             max_retries (int): Maximum number of retries on failure.
 
@@ -310,11 +310,13 @@ class AttachmentVectorSpace(QdrantVectorSpace):
         """
         try:
             # First prepare the points
-            points = self.prepare_vector_points(documents)
+            points_generator = self.prepare_vector_points(
+                documents, batch_size=batch_size
+            )
 
-            # Then store them
-            return self.store_vector_points(
-                points=points,
+            # Collect points in batches and store them
+            self.store_vector_points(
+                points=points_generator,
                 batch_size=batch_size,
                 parallel=parallel,
                 max_retries=max_retries,

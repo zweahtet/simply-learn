@@ -20,107 +20,6 @@ class BaseTask(Task):
         logger.error(f"Task {task_id} failed: {exc}")
 
 
-@celery_app.task(
-    bind=True, name="tasks.document_processing.process_document", base=BaseTask
-)
-def process_document(
-    self,
-    temp_file_path: str,
-    temp_images_path: str,
-    file_id: str,
-    user_jwt: str,
-):
-    """
-    Process a document by extracting text and images, then store in vector database.
-
-    Args:
-        temp_file_path: Path to the temporary file
-        temp_images_path: Path to store extracted images
-        file_id: ID of the file being processed
-        user_jwt: JWT token for the user
-    """
-    supabase_client = get_supabase_client()
-    supabase_auth_response = supabase_client.auth.set_session(
-        access_token=user_jwt, refresh_token=""
-    )
-    user_id = supabase_auth_response.user.id
-
-    # Update task state to STARTED with metadata
-    self.update_state(
-        state="STARTED",
-        meta={"file_id": file_id, "user_id": user_id, "stage": "Starting process"},
-    )
-
-    try:
-        logger.info(f"Starting document processing for file: {file_id}")
-
-        # Update state to extracting content
-        self.update_state(
-            state="PROGRESS",
-            meta={
-                "file_id": file_id,
-                "user_id": user_id,
-                "stage": "Reading document",
-                "progress": 25,
-            },
-        )
-
-        # Extract text and images from PDF
-        logger.info(f"Extracting content from file: {temp_file_path}")
-        reader = PDFMarkdownReader()
-        page_docs = reader.load_data(
-            temp_file_path,
-            temp_images_path,
-            {"user_id": user_id, "file_id": file_id},
-        )
-        logger.info(f"Extracted {len(page_docs)} pages from file: {file_id}")
-
-        # Store documents in vector database
-        logger.info(f"Storing documents in vector database for file: {file_id}")
-        attachment_vs = AttachmentVectorSpace()
-        _ = attachment_vs.store_documents(page_docs, parallel=1, max_retries=1)
-
-        logger.info(f"Successfully processed file: {file_id}")
-
-        # Store images in Supabase storage
-        logger.info(f"Storing images in Supabase storage for file: {file_id}")
-        for image_file in os.listdir(temp_images_path):
-            temp_image_path = pathlib.Path(temp_images_path) / image_file
-            if temp_image_path.is_file():
-                supabase_signed_upload_response = supabase_client.storage.from_(
-                    "attachments"
-                ).create_signed_upload_url(
-                    path=f"{user_id}/{file_id}/images/{image_file}",
-                )
-
-                supabase_upload_response = supabase_client.storage.from_(
-                    "attachments"
-                ).upload_to_signed_url(
-                    path=supabase_signed_upload_response.get("path"),
-                    token=supabase_signed_upload_response.get("token"),
-                    file=temp_image_path,
-                    file_options={
-                        "upsert": "true",
-                        "content-type": "image/png",
-                    },
-                )
-        logger.info(
-            f"Successfully stored images in Supabase storage for file: {file_id}"
-        )
-
-        # Return successful result - this automatically sets state to SUCCESS
-        return {
-            "file_id": file_id,
-            "user_id": user_id,
-            "pages_processed": len(page_docs),
-        }
-
-    except Exception as e:
-        logger.error(f"Error processing document {file_id}: {str(e)}")
-        # Re-raise for Celery to handle - will set state to FAILURE
-        raise
-
-
 # Task 1: Extract content from document
 @celery_app.task(
     bind=True, name="tasks.document_processing.extract_content", base=BaseTask
@@ -249,9 +148,13 @@ def prepare_vectors(self, task_result: dict):
 
         # Prepare the vector points and store them in the vector database
         attachment_vs = AttachmentVectorSpace()
-        points = attachment_vs.store_documents(page_docs, parallel=1, max_retries=1)
+        attachment_vs.store_documents(
+            page_docs, batch_size=16, parallel=1, max_retries=1
+        )
 
-        logger.info(f"Generated {len(points)} vector points for file: {file_id}")
+        logger.info(
+            f"Store documents in Qdrant Vector Database successfully for file {file_id}"
+        )
 
         # Update task state
         self.update_state(
