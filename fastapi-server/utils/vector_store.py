@@ -220,38 +220,22 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             embedding_function = GoogleGeminiEmbeddingFunction(
                 model_name="gemini-embedding-exp-03-07"
             )
-            # Use smaller chunks for the vector DB than for processing
-            # This allows for more granular retrieval
+            # CHECK: would this cause memory issues when processing large documents?
             doc_splitter = get_sentence_splitter()
             doc_chunks = doc_splitter.get_nodes_from_documents(documents)
 
-            # Process in batches to avoid memory issues
-            for i in range(0, len(doc_chunks), batch_size):
-                current_batch = doc_chunks[i : i + batch_size]
+            # Prepare texts for batch embedding
+            texts_to_embed = [chunk.get_content("embed") for chunk in doc_chunks]
 
-                # Prepare texts for batch embedding
-                texts_to_embed = [chunk.get_content("embed") for chunk in current_batch]
+            # Generate embeddings for the entire batch at once
+            embeddings = embedding_function.embed_text(contents=texts_to_embed)
 
-                # Generate embeddings for the entire batch at once
-                batch_embeddings = embedding_function.embed_text(
-                    contents=texts_to_embed
+            for chunk, embedding in zip(doc_chunks, embeddings):
+                yield models.PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector={"dense": embedding},
+                    payload={"document": chunk.get_content(), **chunk.metadata},
                 )
-
-                # Create points using the batch embeddings
-                points = []
-                for j, chunk in enumerate(current_batch):
-                    point = models.PointStruct(
-                        id=str(uuid.uuid4()),
-                        vector={"dense": batch_embeddings[j]},
-                        payload={
-                            "document": chunk.get_content(),
-                            **chunk.metadata,
-                        },
-                    )
-                    points.append(point)
-
-                for point in points:
-                    yield point
         except Exception as e:
             print(f"Error preparing vector points: {e}")
             raise SystemError(f"Error preparing vector points: {e}")

@@ -249,9 +249,11 @@ def summarize_document(self, user_jwt: str, file_id: str):
         # Retrieve documents from vector store
         logger.info(f"Retrieving documents for file ID: {file_id}")
         attachment_vs = AttachmentVectorSpace()
-        page_docs = attachment_vs.get_documents_by_file_id(file_id)
 
-        if not page_docs:
+        # These are the chunks that were stored previously in the vector store
+        docs = attachment_vs.get_documents_by_file_id(file_id)
+
+        if not docs:
             raise Exception("No document content found in vector store")
 
         # Update task state
@@ -271,10 +273,7 @@ def summarize_document(self, user_jwt: str, file_id: str):
             file_id=file_id,
             verbose=True,
         )
-
-        # Process the pages
-        logger.info(f"Processing {len(page_docs)} pages for summarization")
-        summary = summarizer.process_pages(pages=page_docs)
+        summary = summarizer.process_documents(documents=docs)
 
         # Update task state
         self.update_state(
@@ -332,7 +331,7 @@ def summarize_document(self, user_jwt: str, file_id: str):
         logger.info(f"Summary uploaded to Supabase: {upload_summary_response.path}")
 
         # Clean up local files
-        os.remove(temp_file_path)
+        # os.remove(temp_file_path)
 
         # Add final progress update
         self.update_state(
