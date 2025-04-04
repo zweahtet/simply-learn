@@ -1,7 +1,27 @@
 # simply-learn/fastapi-server/utils/embeddings.py
-
+from typing import List
+from google.genai import Client as GoogleGenAIClient
+from google.genai.types import EmbedContentConfig, ContentListUnion, ContentEmbedding
 from fastembed import TextEmbedding, SparseTextEmbedding, LateInteractionTextEmbedding
 from core.config import settings
+
+# Initialize Google GenAI client
+google_genai_client = GoogleGenAIClient(api_key=settings.GOOGLE_GEMINI_API_KEY)
+
+
+class GoogleGeminiEmbeddingFunction:
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+
+    def embed(self, contents: ContentListUnion, task_type: str = "RETRIEVAL_DOCUMENT"):
+        response = google_genai_client.models.embed_content(
+            model=self.model_name,
+            contents=contents,
+            config=EmbedContentConfig(task_type=task_type, output_dimensionality=1024),
+        )
+
+        return [content_embedding.values for content_embedding in response.embeddings]
+
 
 # Initialize the embedding
 # dense_embedding_model = TextEmbedding(

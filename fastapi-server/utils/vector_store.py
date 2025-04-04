@@ -12,6 +12,7 @@ from utils.embeddings import (
 )
 from utils.text_splitter import get_sentence_splitter
 from llama_index.core.schema import Document as LlamaIndexDocument
+from utils.embeddings import GoogleGeminiEmbeddingFunction
 
 class QdrantVectorSpace:
     DEFAULT_TEXT_EMBED_DIMENSION: int = 1024
@@ -156,10 +157,18 @@ class AttachmentVectorSpace(QdrantVectorSpace):
         """
         try:
             # Lazy-load the embedding model
-            dense_embedding_model = get_dense_embedding_model()
+            # dense_embedding_model = get_dense_embedding_model()
 
             # Use dense embedding model for retrieval
-            dense_vectors = next(dense_embedding_model.query_embed(query))
+            # dense_vectors = next(dense_embedding_model.query_embed(query))
+
+            embedding_function = GoogleGeminiEmbeddingFunction(
+                model_name="gemini-embedding-exp-03-07"
+            )
+
+            dense_vectors = embedding_function.embed(
+                contents=[query], task_type="RETRIEVAL_DOCUMENT"
+            )
 
             # Perform the query
             response = self.client.query_points(
@@ -207,8 +216,11 @@ class AttachmentVectorSpace(QdrantVectorSpace):
             List of PointStruct objects ready to be stored
         """
         try:
+            embedding_function = GoogleGeminiEmbeddingFunction(
+                model_name="gemini-embedding-exp-03-07"
+            )
             # Lazy-load the embedding model
-            dense_embedding_model = get_dense_embedding_model()
+            # dense_embedding_model = get_dense_embedding_model()
 
             # Use smaller chunks for the vector DB than for processing
             # This allows for more granular retrieval
@@ -221,10 +233,13 @@ class AttachmentVectorSpace(QdrantVectorSpace):
                     models.PointStruct(
                         id=str(uuid.uuid4()),
                         vector={
-                            "dense": next(
-                                dense_embedding_model.embed(
-                                    documents=chunk.get_content("embed")
-                                )
+                            # "dense": next(
+                            #     dense_embedding_model.embed(
+                            #         documents=chunk.get_content("embed")
+                            #     )
+                            # )
+                            "dense": embedding_function.embed(
+                                contents=[chunk.get_content("embed")]
                             )
                         },
                         payload={
