@@ -83,6 +83,17 @@ export async function deleteFile(userId: string, fileId: string) {
     if (deleteError) {
         throw new Error(deleteError.message);
     }
+
+    // delete the folder
+    const { error: deleteFolderError } = await supabaseClient.storage.from(SupabaseConfig.ATTACHMENT_BUCKET).remove([folderPath]);
+
+    if (deleteFolderError) {
+        throw new Error(deleteFolderError.message);
+    }
+
+    return {
+        success: true,
+    }
 }
 
 // /**
@@ -134,7 +145,7 @@ type FileUploadResponse = {
 
 export async function uploadFile(fileId: string, file: File): Promise<FileUploadResponse> {
     const formData = new FormData();
-    formData.append("fileId", fileId);
+    formData.append("file_id", fileId);
     formData.append("file", file);
 
     const response = await restClient.fetch(`/files/upload`, {

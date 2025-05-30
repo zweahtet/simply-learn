@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Iterable
 
-import pymupdf
 from pymupdf4llm import to_markdown
 from pymupdf import Document as FitzDocument
 
