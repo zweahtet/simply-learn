@@ -16,14 +16,14 @@ export function MainContent({ selectedFile }: MainContentProps) {
     const [activeTab, setActiveTab] = useState<string>("summary");
 
     return (
-		<main className="flex flex-col h-full">
+		<main className="relative w-full min-w-lg">
 			<div className="flex h-14 items-center border-b px-4 md:px-6">
 				<h1 className="text-lg font-semibold">
 					{selectedFile ? selectedFile.name : "Dashboard"}
 				</h1>
 			</div>
 
-			<div className="flex overflow-auto p-4 md:p-6">
+			<div className="flex flex-col p-4">
 				{!selectedFile ? (
 					<div className="flex h-full items-center justify-center">
 						<p className="text-center text-muted-foreground">
@@ -35,7 +35,7 @@ export function MainContent({ selectedFile }: MainContentProps) {
 						defaultValue="summary"
 						value={activeTab}
 						onValueChange={setActiveTab}
-						className="h-full flex flex-col"
+						className="flex flex-col"
 					>
 						<TabsList className="grid w-full grid-cols-4">
 							<TabsTrigger value="summary">Summary</TabsTrigger>
@@ -49,7 +49,7 @@ export function MainContent({ selectedFile }: MainContentProps) {
 								Study Guides
 							</TabsTrigger>
 						</TabsList>
-						<div className="flex-1 overflow-auto mt-4">
+						<div className="flex-1 p-0">
 							<TabsContent value="summary" className="h-full">
 								<SummaryTab fileId={selectedFile.id} />
 							</TabsContent>
