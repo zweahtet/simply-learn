@@ -121,22 +121,6 @@ class TextSimplificationAgent:
         """Count the number of tokens in a text string."""
         return len(encoder.encode(text))
 
-    # def split_text_into_chunks(self, text: str, chunk_size: int = 4000, overlap: int = 100) -> List[str]:
-    #     """Split text into chunks of approximately chunk_size tokens with overlap."""
-    #     if self.num_tokens(text) <= chunk_size:
-    #         return [text]
-
-    #     sentence_splitter = SentenceSplitter(
-    #         chunk_size=chunk_size,
-    #         chunk_overlap=overlap,
-    #         paragraph_separator="\n\n",
-    #         include_metadata=True,
-    #         id_func=lambda x: str(uuid.uuid4()),
-    #     )
-    #     # return sentence_splitter.split_text(text)
-    #     return sentence_splitter.get_nodes_from_documents(documents=)
-
-    # TODO: completion token should have the size of the chunk
     def call_groq_llm(
         self, prompt: str, temperature: float = 0.0, max_completion_tokens: int = 5000
     ) -> str:
@@ -330,12 +314,6 @@ MISSING INFORMATION (be specific and concise):
         # Combine missing elements into a query
         query = " ".join(missing_elements)
 
-        # Query the vector database
-        # results = self.collection.query(
-        #     query_texts=[query],
-        #     n_results=top_k,
-        #     where={"original": True},  # Only retrieve from original document
-        # )
         results = self.attachment_vector_space.retrieve_documents(
             query=query,
             n_results=top_k,
@@ -343,8 +321,6 @@ MISSING INFORMATION (be specific and concise):
         )
 
         # Extract the relevant chunks
-        # if results and "documents" in results and results["documents"]:
-        #     return results["documents"][0]  # First query result, all documents
         if results:
             return [doc.get_content("embed") for doc in results]
 

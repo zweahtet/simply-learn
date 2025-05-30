@@ -7,19 +7,12 @@ from tiktoken import get_encoding
 from llama_index.core.schema import Document as LlamaIndexDocument
 from core.config import settings
 from utils.defaults import GroqModels
-from utils.text_splitter import SentenceSplitter
-from utils.vector_store import AttachmentVectorSpace
 
 # Set up Groq client
 groq_client = groq.Client(api_key=settings.GROQ_API_KEY)
 
 # Tiktoken encoder for token counting
 encoder = get_encoding("cl100k_base")  # OpenAI's encoding works well for most LLMs
-
-# Llamaindex text splitter
-sentence_splitter = SentenceSplitter(
-    chunk_size=8000, chunk_overlap=200, paragraph_separator="\n\n"
-)
 
 DEFAULT_MAP_PROMPT = """
 You are an expert summarizer. Your task is to create a concise and comprehensive
